@@ -1,0 +1,10 @@
+allowBuilds:
+  esbuild: true
+permissions:
+  "@tanstack/vue-table":
+    skills: true
+  vue-demi:
+    build: true
+skills:
+  dirs:
+    - .claude/skills
