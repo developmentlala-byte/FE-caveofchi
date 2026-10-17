@@ -8,7 +8,11 @@ import {
 } from "reka-ui"
 import { cn } from "@/lib/utils"
 
-const props = defineProps<DropdownMenuSubContentProps & { class?: HTMLAttributes["class"] }>()
+interface DropdownMenuSubContentWrapperProps extends /* @vue-ignore */ DropdownMenuSubContentProps {
+  class?: HTMLAttributes["class"]
+}
+
+const props = defineProps<DropdownMenuSubContentWrapperProps>()
 const emits = defineEmits<DropdownMenuSubContentEmits>()
 
 const delegatedProps = reactiveOmit(props, "class")

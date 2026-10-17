@@ -11,11 +11,15 @@ import {
 import { cn } from "@/lib/utils"
 import DrawerOverlay from "./DrawerOverlay.vue"
 
+interface DrawerContentWrapperProps extends /* @vue-ignore */ DrawerContentProps {
+  class?: HTMLAttributes["class"]
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = defineProps<DrawerContentProps & { class?: HTMLAttributes["class"] }>()
+const props = defineProps<DrawerContentWrapperProps>()
 const emits = defineEmits<DrawerContentEmits>()
 
 const delegatedProps = reactiveOmit(props, "class")

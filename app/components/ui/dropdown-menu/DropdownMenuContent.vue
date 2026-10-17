@@ -9,12 +9,17 @@ import {
 } from "reka-ui"
 import { cn } from "@/lib/utils"
 
+interface DropdownMenuContentWrapperProps extends /* @vue-ignore */ DropdownMenuContentProps {
+  class?: HTMLAttributes["class"]
+  sideOffset?: number
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
 const props = withDefaults(
-  defineProps<DropdownMenuContentProps & { class?: HTMLAttributes["class"] }>(),
+  defineProps<DropdownMenuContentWrapperProps>(),
   {
     sideOffset: 4,
   },

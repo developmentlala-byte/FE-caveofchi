@@ -5,11 +5,16 @@ import { reactiveOmit } from "@vueuse/core"
 import { TooltipArrow, TooltipContent, TooltipPortal, useForwardPropsEmits } from "reka-ui"
 import { cn } from "@/lib/utils"
 
+interface TooltipContentWrapperProps extends /* @vue-ignore */ TooltipContentProps {
+  class?: HTMLAttributes["class"]
+  sideOffset?: number
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = withDefaults(defineProps<TooltipContentProps & { class?: HTMLAttributes["class"] }>(), {
+const props = withDefaults(defineProps<TooltipContentWrapperProps>(), {
   sideOffset: 4,
 })
 

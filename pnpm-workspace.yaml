@@ -1,5 +1,8 @@
 allowBuilds:
   esbuild: true
+# Make Vue declaration dependencies visible to the SFC compiler.
+publicHoistPattern:
+  - "@vue/*"
 permissions:
   "@tanstack/vue-table":
     skills: true

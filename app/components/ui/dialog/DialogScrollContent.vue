@@ -12,11 +12,15 @@ import {
 } from "reka-ui"
 import { cn } from "@/lib/utils"
 
+interface DialogScrollContentProps extends /* @vue-ignore */ DialogContentProps {
+  class?: HTMLAttributes["class"]
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"] }>()
+const props = defineProps<DialogScrollContentProps>()
 const emits = defineEmits<DialogContentEmits>()
 
 const delegatedProps = reactiveOmit(props, "class")

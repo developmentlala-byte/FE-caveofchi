@@ -12,11 +12,16 @@ import {
 import { cn } from "@/lib/utils"
 import DialogOverlay from "./DialogOverlay.vue"
 
+interface DialogContentWrapperProps extends /* @vue-ignore */ DialogContentProps {
+  class?: HTMLAttributes["class"]
+  showCloseButton?: boolean
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = withDefaults(defineProps<DialogContentProps & { class?: HTMLAttributes["class"], showCloseButton?: boolean }>(), {
+const props = withDefaults(defineProps<DialogContentWrapperProps>(), {
   showCloseButton: true,
 })
 const emits = defineEmits<DialogContentEmits>()
