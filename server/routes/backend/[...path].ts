@@ -1,0 +1,44 @@
+import {
+  createError,
+  defineEventHandler,
+  getRequestURL,
+  getRouterParam,
+  proxyRequest,
+} from "h3";
+
+export default defineEventHandler((event) => {
+  const path = getRouterParam(event, "path");
+  if (!path) {
+    throw createError({ statusCode: 404, statusMessage: "Not found" });
+  }
+
+  const config = useRuntimeConfig(event);
+  const apiOrigin = config.public.apiBase
+    .replace(/\/+$/, "")
+    .replace(/\/api$/, "");
+  let target: URL;
+
+  try {
+    target = new URL(apiOrigin);
+  } catch {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "The API base URL is invalid",
+    });
+  }
+
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "The API base URL must use HTTP or HTTPS",
+    });
+  }
+
+  target.pathname = `/${path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
+  target.search = getRequestURL(event).search;
+
+  return proxyRequest(event, target.toString());
+});

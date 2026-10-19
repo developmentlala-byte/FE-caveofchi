@@ -12,7 +12,8 @@ import DataTable from "~/components/DataTable.vue";
 import type { DataTableFeatures } from "~/components/dataTableFeatures";
 import { useApiDelete, useApiPut } from "~/composables/useApiMutation";
 import { useApiQuery } from "~/composables/useApiQuery";
-import { toast } from "vue-sonner";
+import { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -176,6 +177,7 @@ const updateBooking = useApiPut<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const deleteBooking = useApiDelete<ApiEnvelope<null>, number>({
   url: (id) => `/master/event-booking/${id}`,
@@ -227,14 +229,32 @@ const handleUpdate = async (values: BookingUpdateInput) => {
   const booking = editingBooking.value;
   if (!booking) return;
 
-  const response = await updateBooking.mutateAsync({
-    id: booking.id,
-    ...values,
-  });
-  editingBooking.value = null;
-  selectedBooking.value = response.data;
-  detailOpen.value = true;
-  toast.success(response.message);
+  await withToastPromise(
+    async () => {
+      const response = await updateBooking.mutateAsync({
+        id: booking.id,
+        ...values,
+      });
+      editingBooking.value = null;
+      selectedBooking.value = response.data;
+      detailOpen.value = true;
+      return {
+        title: "Booking berhasil diperbarui",
+        description: `${booking.booking_code} · ${
+          response.data.event_name_snapshot
+        } · ${formatDateTime(response.data.session_starts_at_snapshot)}`,
+      };
+    },
+    {
+      loading: "Memperbarui booking...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Booking gagal diperbarui",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const canDeleteBooking = (booking: EventBooking) =>
@@ -251,20 +271,28 @@ const handleDelete = async (booking: EventBooking) => {
     return;
   }
 
-  try {
-    const response = await deleteBooking.mutateAsync(booking.id);
-    if (selectedBooking.value?.id === booking.id) {
-      selectedBooking.value = null;
-      detailOpen.value = false;
-    }
-    toast.success(response.message);
-  } catch (error) {
-    toast.error(
-      error instanceof Error
-        ? error.message
-        : "Booking gagal dihapus. Silakan coba lagi.",
-    );
-  }
+  await withToastPromise(
+    async () => {
+      await deleteBooking.mutateAsync(booking.id);
+      if (selectedBooking.value?.id === booking.id) {
+        selectedBooking.value = null;
+        detailOpen.value = false;
+      }
+      return {
+        title: "Booking berhasil dihapus",
+        description: `${booking.booking_code} · Kuota sesi telah dikembalikan.`,
+      };
+    },
+    {
+      loading: "Menghapus booking...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Booking gagal dihapus",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 </script>
 

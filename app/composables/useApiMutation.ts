@@ -6,8 +6,18 @@ import {
 } from "@tanstack/vue-query";
 import type { AxiosRequestConfig } from "axios";
 import type { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 
 export type MutationMethod = "post" | "put" | "patch" | "delete";
+
+type MaybeMessageResolver<TValue, TVariables> =
+  string | ((value: TValue, variables: TVariables) => string);
+
+export interface MutationToastOptions<TData, TVariables> {
+  loading?: string | ((variables: TVariables) => string);
+  success?: MaybeMessageResolver<TData, TVariables>;
+  error?: MaybeMessageResolver<unknown, TVariables>;
+}
 
 export interface UseApiMutationArgs<TData, TVariables> {
   method: MutationMethod;
@@ -22,6 +32,12 @@ export interface UseApiMutationArgs<TData, TVariables> {
   config?: Omit<AxiosRequestConfig, "url" | "method" | "data" | "signal">;
   /** Query key yang di-invalidate otomatis setelah mutation sukses. */
   invalidateKeys?: readonly QueryKey[];
+  /**
+   * Toast default untuk aksi ke server.
+   * Aktif otomatis untuk mutation client-side kecuali `options.meta.silentError === true`
+   * atau `toast: false`.
+   */
+  toast?: false | MutationToastOptions<TData, TVariables>;
   /** Opsi TanStack Query (onSuccess, onError, onMutate, dll). */
   options?: Omit<UseMutationOptions<TData, ApiError, TVariables>, "mutationFn">;
 }
@@ -41,6 +57,7 @@ export function useApiMutation<TData = unknown, TVariables = void>({
   body,
   config,
   invalidateKeys = [],
+  toast,
   options,
 }: UseApiMutationArgs<TData, TVariables>) {
   const http = useHttp();
@@ -54,16 +71,87 @@ export function useApiMutation<TData = unknown, TVariables = void>({
     return method === "delete" ? undefined : variables;
   };
 
+  const defaultLoadingMessage: Record<MutationMethod, string> = {
+    post: "Menyimpan data...",
+    put: "Menyimpan perubahan...",
+    patch: "Menyimpan perubahan...",
+    delete: "Menghapus data...",
+  };
+
+  const defaultSuccessMessage: Record<MutationMethod, string> = {
+    post: "Data berhasil disimpan.",
+    put: "Perubahan berhasil disimpan.",
+    patch: "Perubahan berhasil disimpan.",
+    delete: "Data berhasil dihapus.",
+  };
+
+  const shouldAutoToast =
+    import.meta.client &&
+    toast !== false &&
+    options?.meta?.silentError !== true;
+
+  const resolveToastMessage = <TValue>(
+    resolver: MaybeMessageResolver<TValue, TVariables> | undefined,
+    value: TValue,
+    variables: TVariables,
+    fallback: string,
+  ) =>
+    typeof resolver === "function"
+      ? resolver(value, variables)
+      : (resolver ?? fallback);
+
+  const responseMessage = (value: TData): string | undefined =>
+    typeof value === "object" &&
+    value !== null &&
+    "message" in value &&
+    typeof value.message === "string"
+      ? value.message
+      : undefined;
+
   return useMutation<TData, ApiError, TVariables>({
     ...options,
+    meta: shouldAutoToast
+      ? { ...options?.meta, silentError: true }
+      : options?.meta,
     mutationFn: async (variables) => {
-      const { data } = await http.request<TData>({
-        ...config,
-        method,
-        url: resolveUrl(variables),
-        data: resolveBody(variables),
-      });
-      return data;
+      const request = async () => {
+        const { data } = await http.request<TData>({
+          ...config,
+          method,
+          url: resolveUrl(variables),
+          data: resolveBody(variables),
+        });
+        return data;
+      };
+
+      if (!shouldAutoToast) {
+        return request();
+      }
+
+      return withToastPromise(
+        request,
+        {
+          loading:
+            typeof toast?.loading === "function"
+              ? toast.loading(variables)
+              : (toast?.loading ?? defaultLoadingMessage[method]),
+          success: (data) =>
+            resolveToastMessage(
+              toast?.success,
+              data,
+              variables,
+              responseMessage(data) ?? defaultSuccessMessage[method],
+            ),
+          error: (error) =>
+            resolveToastMessage(
+              toast?.error,
+              error,
+              variables,
+              "Permintaan ke server gagal. Silakan coba lagi.",
+            ),
+        },
+        { rethrow: true },
+      );
     },
     onSuccess: async (...args) => {
       await Promise.all(

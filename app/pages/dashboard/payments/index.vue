@@ -27,6 +27,7 @@ import type {
 } from "../bookings/types/booking.types";
 import BookingDetailSheet from "../bookings/components/BookingDetailSheet.vue";
 import PaymentFilter from "./components/PaymentFilter.vue";
+import { toast } from "vue-sonner";
 
 interface PaginationMeta {
   current_page: number;
@@ -549,5 +550,6 @@ const refreshAll = async () => {
       :error="bookingDetailQuery.isError.value"
       @refresh="bookingDetailQuery.refetch()"
     />
+    <button @click="toast('tes toast')">Tes toast</button>
   </section>
 </template>

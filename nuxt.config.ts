@@ -8,11 +8,6 @@ export default defineNuxtConfig({
       apiBase: process.env.NUXT_PUBLIC_API_BASE ?? "http://localhost:8000",
     },
   },
-  routeRules: {
-    "/backend/**": {
-      proxy: "https://design.langitlangit.id/backend/**",
-    },
-  },
   shadcn: {
     /**
      * Prefix for all the imported component.

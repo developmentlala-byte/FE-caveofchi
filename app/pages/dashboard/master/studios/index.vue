@@ -2,11 +2,12 @@
 import { computed, onScopeDispose, ref, watch } from "vue";
 import { createColumnHelper } from "@tanstack/vue-table";
 import { PhEye, PhPencilSimple, PhPlus, PhTrash } from "@phosphor-icons/vue";
-import { toast } from "vue-sonner";
 import DataTable from "~/components/DataTable.vue";
 import type { DataTableFeatures } from "~/components/dataTableFeatures";
 import { useApiDelete, useApiPost } from "~/composables/useApiMutation";
 import { useApiQuery } from "~/composables/useApiQuery";
+import { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import CreateStudioModal from "./modals/CreateStudioModal.vue";
@@ -148,12 +149,14 @@ const createStudio = useApiPost<ApiEnvelope<Studio>, FormData>({
   url: "/master/studio",
   config: { headers: { "Content-Type": "multipart/form-data" } },
   invalidateKeys: [["studios"], ["studio-images"]],
+  options: { meta: { silentError: true } },
 });
 
 const uploadStudioGallery = useApiPost<ApiEnvelope<unknown[]>, FormData>({
   url: "/master/studio/list-image/bulk",
   config: { headers: { "Content-Type": "multipart/form-data" } },
   invalidateKeys: [["studios"], ["studio-images"]],
+  options: { meta: { silentError: true } },
 });
 
 const updateStudio = useApiPost<
@@ -169,6 +172,7 @@ const updateStudio = useApiPost<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 
 const deleteStudio = useApiDelete<ApiEnvelope<null>, number>({
@@ -179,11 +183,13 @@ const deleteStudio = useApiDelete<ApiEnvelope<null>, number>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 
 const deleteStudioImage = useApiDelete<ApiEnvelope<null>, number>({
   url: (id) => `/master/studio/list-image/${id}`,
   invalidateKeys: [["studios"], ["studio-images"]],
+  options: { meta: { silentError: true } },
 });
 
 const toFormData = (values: StudioFormValues, update = false) => {
@@ -206,50 +212,80 @@ const toGalleryFormData = (studioId: number, images: File[]) => {
 };
 
 const handleCreate = async (values: StudioFormValues) => {
-  const response = await createStudio.mutateAsync(toFormData(values));
-  createOpen.value = false;
+  let studioCreated = false;
+  await withToastPromise(
+    async () => {
+      const response = await createStudio.mutateAsync(toFormData(values));
+      studioCreated = true;
+      createOpen.value = false;
 
-  if (values.gallery_images.length) {
-    try {
-      await uploadStudioGallery.mutateAsync(
-        toGalleryFormData(response.data.id, values.gallery_images),
-      );
-    } catch (error) {
-      const reason = error instanceof Error ? ` ${error.message}` : "";
-      toast.error(
-        `Studio berhasil dibuat, tetapi foto galeri gagal diunggah.${reason} Tambahkan kembali foto melalui Edit Studio.`,
-      );
-      return;
-    }
-  }
-
-  toast.success("Studio dan foto galeri berhasil disimpan.");
+      if (values.gallery_images.length) {
+        await uploadStudioGallery.mutateAsync(
+          toGalleryFormData(response.data.id, values.gallery_images),
+        );
+      }
+      return {
+        title: "Studio berhasil dibuat",
+        description: values.gallery_images.length
+          ? `${values.name} · ${values.gallery_images.length} foto galeri diunggah.`
+          : `${values.name} siap dikelola.`,
+      };
+    },
+    {
+      loading: "Menyimpan studio...",
+      success: (message) => message,
+      error: (error) => ({
+        title: studioCreated
+          ? "Studio dibuat, foto galeri gagal diunggah"
+          : "Studio gagal dibuat",
+        description: studioCreated
+          ? `${ApiError.from(error).userMessage} Tambahkan foto melalui Edit Studio.`
+          : ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleUpdate = async (values: StudioFormValues) => {
   const studio = editingStudio.value;
   if (!studio) return;
-  await updateStudio.mutateAsync({
-    id: studio.id,
-    formData: toFormData(values, true),
-  });
+  let studioUpdated = false;
+  await withToastPromise(
+    async () => {
+      await updateStudio.mutateAsync({
+        id: studio.id,
+        formData: toFormData(values, true),
+      });
+      studioUpdated = true;
 
-  if (values.gallery_images.length) {
-    try {
-      await uploadStudioGallery.mutateAsync(
-        toGalleryFormData(studio.id, values.gallery_images),
-      );
-    } catch (error) {
-      const reason = error instanceof Error ? ` ${error.message}` : "";
-      toast.error(
-        `Informasi studio berhasil diperbarui, tetapi foto galeri gagal diunggah.${reason}`,
-      );
-      return;
-    }
-  }
-
-  editingStudio.value = null;
-  toast.success("Studio berhasil diperbarui.");
+      if (values.gallery_images.length) {
+        await uploadStudioGallery.mutateAsync(
+          toGalleryFormData(studio.id, values.gallery_images),
+        );
+      }
+      editingStudio.value = null;
+      return {
+        title: "Studio berhasil diperbarui",
+        description: values.gallery_images.length
+          ? `${studio.name} · ${values.gallery_images.length} foto galeri diperbarui.`
+          : `${studio.name} · Informasi studio sudah terbaru.`,
+      };
+    },
+    {
+      loading: "Memperbarui studio...",
+      success: (message) => message,
+      error: (error) => ({
+        title: studioUpdated
+          ? "Studio diperbarui, foto galeri gagal diunggah"
+          : "Studio gagal diperbarui",
+        description: studioUpdated
+          ? `${ApiError.from(error).userMessage} Tambahkan foto melalui Edit Studio.`
+          : ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleDeleteGalleryImage = async (image: StudioImage) => {
@@ -262,15 +298,27 @@ const handleDeleteGalleryImage = async (image: StudioImage) => {
   }
 
   deletingGalleryImageId.value = image.id;
-  try {
-    await deleteStudioImage.mutateAsync(image.id);
-    toast.success("Foto galeri berhasil dihapus.");
-  } catch (error) {
-    const reason = error instanceof Error ? ` ${error.message}` : "";
-    toast.error(`Foto galeri gagal dihapus.${reason}`);
-  } finally {
-    deletingGalleryImageId.value = null;
-  }
+  await withToastPromise(
+    async () => {
+      await deleteStudioImage.mutateAsync(image.id);
+      return {
+        title: "Foto galeri berhasil dihapus",
+        description: `${
+          editingStudio.value?.name ?? selectedStudio.value?.name ?? "Studio"
+        } · Foto dihapus dari galeri.`,
+      };
+    },
+    {
+      loading: "Menghapus foto galeri...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Foto galeri gagal dihapus",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
+  deletingGalleryImageId.value = null;
 };
 
 const handleDelete = async (studio: Studio) => {
@@ -281,12 +329,28 @@ const handleDelete = async (studio: Studio) => {
   ) {
     return;
   }
-  await deleteStudio.mutateAsync(studio.id);
-  if (selectedStudio.value?.id === studio.id) {
-    selectedStudio.value = null;
-    detailOpen.value = false;
-  }
-  toast.success("Studio berhasil dihapus.");
+  await withToastPromise(
+    async () => {
+      await deleteStudio.mutateAsync(studio.id);
+      if (selectedStudio.value?.id === studio.id) {
+        selectedStudio.value = null;
+        detailOpen.value = false;
+      }
+      return {
+        title: "Studio berhasil dihapus",
+        description: `${studio.name} · ${studio.code}`,
+      };
+    },
+    {
+      loading: "Menghapus studio...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Studio gagal dihapus",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const openDetails = (studio: Studio) => {

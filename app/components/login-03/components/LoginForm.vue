@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue";
 import { computed, reactive, ref } from "vue";
-import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
@@ -50,19 +50,34 @@ async function submit(): Promise<void> {
 
   try {
     if (isRegister.value) {
-      await register(
-        form.name,
-        form.email,
-        form.password,
-        form.passwordConfirmation,
+      await withToastPromise(
+        () =>
+          register(
+            form.name,
+            form.email,
+            form.password,
+            form.passwordConfirmation,
+          ),
+        {
+          loading: "Membuat akun...",
+          success: "Akun berhasil dibuat.",
+          error: (error) => ApiError.from(error).userMessage,
+        },
+        { rethrow: true },
       );
-      toast.success("Akun berhasil dibuat.");
       await navigateTo("/dashboard");
       return;
     }
 
-    await login(form.email, form.password, form.remember);
-    toast.success("Berhasil masuk.");
+    await withToastPromise(
+      () => login(form.email, form.password, form.remember),
+      {
+        loading: "Masuk ke dashboard...",
+        success: "Berhasil masuk.",
+        error: (error) => ApiError.from(error).userMessage,
+      },
+      { rethrow: true },
+    );
     await navigateTo(redirectPath.value);
   } catch (error) {
     if (error instanceof ApiError) {

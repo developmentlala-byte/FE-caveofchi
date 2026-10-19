@@ -20,11 +20,9 @@ function notifyError(
   error: unknown,
   meta: Record<string, unknown> | undefined,
 ): void {
-  if (import.meta.server || meta?.silentError) return;
+  if (import.meta.server) return;
 
   const apiError = ApiError.from(error);
-
-  toast.error(apiError.message);
 
   console.error("[API Error]", {
     status: apiError.status,
@@ -32,6 +30,13 @@ function notifyError(
     systemMessage: apiError.systemMessage,
     errors: apiError.errors,
   });
+
+  if (!meta?.silentError) {
+    toast.error("Permintaan gagal", {
+      description: apiError.userMessage,
+      duration: 6000,
+    });
+  }
 }
 
 export default defineNuxtPlugin((nuxtApp) => {

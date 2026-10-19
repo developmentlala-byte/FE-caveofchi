@@ -19,6 +19,7 @@ import EventDetailSheet from "./components/EventDetailSheet.vue";
 import EventFormDialog from "./components/EventFormDialog.vue";
 import EventSessionFormDialog from "./components/EventSessionFormDialog.vue";
 import { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 import { toJakartaDateTime } from "~/utils/jakarta-date-time";
 import type {
   ApiEnvelope,
@@ -251,6 +252,7 @@ const createEvent = useApiPost<ApiEnvelope<EventModel>, FormData>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const updateEvent = useApiPost<
   ApiEnvelope<EventModel>,
@@ -266,6 +268,7 @@ const updateEvent = useApiPost<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const deleteEvent = useApiDelete<ApiEnvelope<null>, number>({
   url: (id) => `/master/event/${id}`,
@@ -277,6 +280,7 @@ const deleteEvent = useApiDelete<ApiEnvelope<null>, number>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const publishEvent = useApiPost<ApiEnvelope<EventModel>, number>({
   url: (id) => `/master/event/${id}/publish`,
@@ -287,6 +291,7 @@ const publishEvent = useApiPost<ApiEnvelope<EventModel>, number>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const archiveEvent = useApiPost<ApiEnvelope<EventModel>, number>({
   url: (id) => `/master/event/${id}/archive`,
@@ -297,6 +302,7 @@ const archiveEvent = useApiPost<ApiEnvelope<EventModel>, number>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 
 const createSession = useApiPost<
@@ -340,6 +346,7 @@ const deleteSession = useApiDelete<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 
 const closeSession = useApiPost<
@@ -354,6 +361,7 @@ const closeSession = useApiPost<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 const cancelSession = useApiPost<
   ApiEnvelope<EventSession>,
@@ -367,6 +375,7 @@ const cancelSession = useApiPost<
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
 });
 
 const uploadImages = useApiPost<
@@ -385,6 +394,7 @@ const deleteImage = useApiDelete<
 >({
   url: ({ eventId, imageId }) => `/master/event/${eventId}/image/${imageId}`,
   invalidateKeys: [["event-images"]],
+  options: { meta: { silentError: true } },
 });
 
 const sessionFormOpen = ref(false);
@@ -442,7 +452,7 @@ const sessionPayload = (values: EventSessionFormValues) => ({
   notes: values.notes || null,
 });
 
-const reportError = (verb: string, error: unknown) => {
+const formatError = (error: unknown) => {
   const apiError = ApiError.from(error);
   const validationDetails = Object.entries(apiError.errors ?? {})
     .flatMap(([field, messages]) =>
@@ -469,71 +479,86 @@ const reportError = (verb: string, error: unknown) => {
       }),
     )
     .join(" ");
-  toast.error(
-    `${verb}. ${apiError.message}${validationDetails ? ` ${validationDetails}` : ""}`,
-  );
+  return `${apiError.message}${validationDetails ? ` ${validationDetails}` : ""}`;
 };
 
 const handleCreateEvent = async (values: EventFormValues) => {
-  let createdEvent: EventModel;
-  try {
-    const response = await createEvent.mutateAsync(toEventFormData(values));
-    createdEvent = response.data;
-  } catch (error) {
-    reportError("Event gagal dibuat", error);
-    return;
-  }
+  let createdEvent: EventModel | null = null;
+  let stage = "membuat event";
+  await withToastPromise(
+    async () => {
+      const response = await createEvent.mutateAsync(toEventFormData(values));
+      createdEvent = response.data;
+      selectedEvent.value = response.data;
+      createOpen.value = false;
 
-  selectedEvent.value = createdEvent;
-  createOpen.value = false;
+      if (values.first_session === null) {
+        return {
+          title: "Event berhasil dibuat sebagai draft",
+          description: `${response.data.name} · ${response.data.code}`,
+        };
+      }
 
-  if (values.first_session === null) {
-    toast.success("Event berhasil dibuat sebagai draft.");
-    return;
-  }
+      stage = "membuat sesi";
+      await createSession.mutateAsync({
+        eventId: response.data.id,
+        values: sessionPayload(values.first_session),
+      });
 
-  let stage = "membuat sesi";
-  try {
-    await createSession.mutateAsync({
-      eventId: createdEvent.id,
-      values: sessionPayload(values.first_session),
-    });
-
-    stage = "menerbitkan event";
-    const publishedResponse = await publishEvent.mutateAsync(createdEvent.id);
-    selectedEvent.value = publishedResponse.data;
-
-    selectedEvent.value = publishedResponse.data;
-    detailOpen.value = true;
-    toast.success(
-      "Event diterbitkan. Penjualan sesi aktif otomatis selama periode pendaftaran dan slot tersedia.",
-    );
-  } catch (error) {
-    detailOpen.value = true;
-    reportError(
-      `Event berhasil dibuat, tetapi gagal ${stage}. Lanjutkan dari detail event`,
-      error,
-    );
-  }
+      stage = "menerbitkan event";
+      const publishedResponse = await publishEvent.mutateAsync(response.data.id);
+      selectedEvent.value = publishedResponse.data;
+      detailOpen.value = true;
+      return {
+        title: "Event berhasil diterbitkan",
+        description: `${publishedResponse.data.name} · Penjualan sesi aktif selama periode pendaftaran dan slot tersedia.`,
+      };
+    },
+    {
+      loading: "Menyimpan event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: createdEvent
+          ? `Event dibuat, tetapi gagal ${stage}`
+          : "Event gagal dibuat",
+        description: createdEvent
+          ? `${formatError(error)} Lanjutkan dari detail event.`
+          : formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleUpdateEvent = async (values: EventFormValues) => {
   const event = editingEvent.value;
   if (!event) return;
 
-  try {
-    const response = await updateEvent.mutateAsync({
-      id: event.id,
-      formData: toEventFormData(values, true),
-    });
-    if (selectedEvent.value?.id === event.id) {
-      selectedEvent.value = response.data;
-    }
-    editingEvent.value = null;
-    toast.success("Event berhasil diperbarui.");
-  } catch (error) {
-    reportError("Event gagal diperbarui", error);
-  }
+  await withToastPromise(
+    async () => {
+      const response = await updateEvent.mutateAsync({
+        id: event.id,
+        formData: toEventFormData(values, true),
+      });
+      if (selectedEvent.value?.id === event.id) {
+        selectedEvent.value = response.data;
+      }
+      editingEvent.value = null;
+      return {
+        title: "Event berhasil diperbarui",
+        description: `${response.data.name} · ${response.data.code}`,
+      };
+    },
+    {
+      loading: "Memperbarui event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Event gagal diperbarui",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleDeleteEvent = async (event: EventModel) => {
@@ -545,70 +570,123 @@ const handleDeleteEvent = async (event: EventModel) => {
     return;
   }
 
-  try {
-    await deleteEvent.mutateAsync(event.id);
-    if (selectedEvent.value?.id === event.id) {
-      selectedEvent.value = null;
-      detailOpen.value = false;
-    }
-    toast.success("Event berhasil dihapus.");
-  } catch (error) {
-    reportError("Event gagal dihapus", error);
-  }
+  await withToastPromise(
+    async () => {
+      await deleteEvent.mutateAsync(event.id);
+      if (selectedEvent.value?.id === event.id) {
+        selectedEvent.value = null;
+        detailOpen.value = false;
+      }
+      return {
+        title: "Event berhasil dihapus",
+        description: `${event.name} · ${event.code}`,
+      };
+    },
+    {
+      loading: "Menghapus event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Event gagal dihapus",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handlePublish = async (event: EventModel) => {
-  try {
-    const response = await publishEvent.mutateAsync(event.id);
-    selectedEvent.value = response.data;
-    toast.success("Event berhasil diterbitkan.");
-  } catch (error) {
-    reportError("Event belum dapat diterbitkan", error);
-  }
+  await withToastPromise(
+    async () => {
+      const response = await publishEvent.mutateAsync(event.id);
+      selectedEvent.value = response.data;
+      return {
+        title: "Event berhasil diterbitkan",
+        description: `${response.data.name} · ${response.data.code}`,
+      };
+    },
+    {
+      loading: "Menerbitkan event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Event belum dapat diterbitkan",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleArchive = async (event: EventModel) => {
   if (!window.confirm(`Arsipkan event "${event.name}" dan tutup penjualan?`)) {
     return;
   }
-  try {
-    const response = await archiveEvent.mutateAsync(event.id);
-    selectedEvent.value = response.data;
-    toast.success("Event berhasil diarsipkan.");
-  } catch (error) {
-    reportError("Event gagal diarsipkan", error);
-  }
+  await withToastPromise(
+    async () => {
+      const response = await archiveEvent.mutateAsync(event.id);
+      selectedEvent.value = response.data;
+      return {
+        title: "Event berhasil diarsipkan",
+        description: `${response.data.name} · ${response.data.code} · Penjualan ditutup.`,
+      };
+    },
+    {
+      loading: "Mengarsipkan event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Event gagal diarsipkan",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleSessionSubmit = async (values: EventSessionFormValues) => {
   const event = selectedEvent.value;
   if (!event) return;
   if (values.studio_id === null) {
-    toast.error("Pilih studio aktif sebelum menyimpan sesi.");
+    toast.error("Sesi belum dapat disimpan", {
+      description: "Pilih studio aktif, lalu coba simpan kembali.",
+      duration: 6000,
+    });
     return;
   }
 
   const payload = sessionPayload(values);
-  try {
-    if (editingSession.value) {
-      await updateSession.mutateAsync({
-        eventId: event.id,
-        sessionId: editingSession.value.id,
-        values: payload,
-      });
-      toast.success("Sesi berhasil diperbarui.");
-    } else {
-      await createSession.mutateAsync({
-        eventId: event.id,
-        values: payload,
-      });
-      toast.success("Sesi berhasil disiapkan sebagai draft.");
-    }
-    sessionFormOpen.value = false;
-    editingSession.value = null;
-  } catch (error) {
-    reportError("Sesi gagal disimpan", error);
-  }
+  const isEditing = editingSession.value !== null;
+  await withToastPromise(
+    async () => {
+      if (editingSession.value) {
+        await updateSession.mutateAsync({
+          eventId: event.id,
+          sessionId: editingSession.value.id,
+          values: payload,
+        });
+      } else {
+        await createSession.mutateAsync({
+          eventId: event.id,
+          values: payload,
+        });
+      }
+      sessionFormOpen.value = false;
+      editingSession.value = null;
+      return {
+        title: isEditing
+          ? "Sesi berhasil diperbarui"
+          : "Sesi berhasil disiapkan sebagai draft",
+        description: `${event.code} · ${activeStudios.value.find((studio) => studio.id === values.studio_id)?.name ?? "Studio"} · ${values.starts_at.replace("T", " ")}`,
+      };
+    },
+    {
+      loading: isEditing ? "Memperbarui sesi..." : "Menyimpan sesi...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Sesi gagal disimpan",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleDeleteSession = async (session: EventSession) => {
@@ -616,15 +694,27 @@ const handleDeleteSession = async (session: EventSession) => {
   if (!event) return;
   if (!window.confirm("Hapus sesi draft ini?")) return;
 
-  try {
-    await deleteSession.mutateAsync({
-      eventId: event.id,
-      sessionId: session.id,
-    });
-    toast.success("Sesi berhasil dihapus.");
-  } catch (error) {
-    reportError("Sesi gagal dihapus", error);
-  }
+  await withToastPromise(
+    async () => {
+      await deleteSession.mutateAsync({
+        eventId: event.id,
+        sessionId: session.id,
+      });
+      return {
+        title: "Sesi berhasil dihapus",
+        description: `${event.code} · ${session.studio.name} · ${session.starts_at.replace("T", " ")}`,
+      };
+    },
+    {
+      loading: "Menghapus sesi...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Sesi gagal dihapus",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleSessionTransition = async (
@@ -637,19 +727,33 @@ const handleSessionTransition = async (
     close: closeSession,
     cancel: cancelSession,
   }[action];
-  try {
-    await mutation.mutateAsync({
-      eventId: event.id,
-      sessionId: session.id,
-    });
-    const message = {
-      close: "Penjualan sesi berhasil ditutup.",
-      cancel: "Sesi berhasil dibatalkan.",
-    }[action];
-    toast.success(message);
-  } catch (error) {
-    reportError("Status sesi gagal diperbarui", error);
-  }
+  await withToastPromise(
+    async () => {
+      await mutation.mutateAsync({
+        eventId: event.id,
+        sessionId: session.id,
+      });
+      return {
+        close: {
+          title: "Penjualan sesi berhasil ditutup",
+          description: `${event.code} · ${session.studio.name} · ${session.starts_at.replace("T", " ")}`,
+        },
+        cancel: {
+          title: "Sesi berhasil dibatalkan",
+          description: `${event.code} · ${session.studio.name} · ${session.starts_at.replace("T", " ")}`,
+        },
+      }[action];
+    },
+    {
+      loading: action === "close" ? "Menutup penjualan sesi..." : "Membatalkan sesi...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Status sesi gagal diperbarui",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleUploadImages = async (images: File[]) => {
@@ -657,24 +761,48 @@ const handleUploadImages = async (images: File[]) => {
   if (!event) return;
   const formData = new FormData();
   images.forEach((image) => formData.append("images[]", image));
-  try {
-    await uploadImages.mutateAsync({ eventId: event.id, formData });
-    toast.success(`${images.length} gambar event berhasil diunggah.`);
-  } catch (error) {
-    reportError("Galeri event gagal diunggah", error);
-  }
+  await withToastPromise(
+    async () => {
+      await uploadImages.mutateAsync({ eventId: event.id, formData });
+      return {
+        title: "Gambar event berhasil diunggah",
+        description: `${event.name} · ${images.length} gambar ditambahkan ke galeri.`,
+      };
+    },
+    {
+      loading: "Mengunggah gambar event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Galeri event gagal diunggah",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const handleDeleteImage = async (image: EventImage) => {
   const event = selectedEvent.value;
   if (!event) return;
   if (!window.confirm("Hapus gambar ini dari galeri event?")) return;
-  try {
-    await deleteImage.mutateAsync({ eventId: event.id, imageId: image.id });
-    toast.success("Gambar event berhasil dihapus.");
-  } catch (error) {
-    reportError("Gambar event gagal dihapus", error);
-  }
+  await withToastPromise(
+    async () => {
+      await deleteImage.mutateAsync({ eventId: event.id, imageId: image.id });
+      return {
+        title: "Gambar event berhasil dihapus",
+        description: `${event.name} · Gambar #${image.id} dihapus dari galeri.`,
+      };
+    },
+    {
+      loading: "Menghapus gambar event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Gambar event gagal dihapus",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
 };
 
 const openDetails = (event: EventModel) => {

@@ -14,7 +14,6 @@ import {
   PhWarningCircle,
   PhX,
 } from "@phosphor-icons/vue";
-import { toast } from "vue-sonner";
 import type {
   ApiEnvelope,
   BookingPaymentMethod,
@@ -25,6 +24,7 @@ import type { Event as EventModel } from "~/pages/dashboard/master/events/types/
 import { useApiPost } from "~/composables/useApiMutation";
 import { useApiQuery } from "~/composables/useApiQuery";
 import { ApiError } from "~/utils/api-error";
+import { withToastPromise } from "~/utils/toast-promise";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -278,29 +278,46 @@ const submitBooking = async () => {
   if (!session || !canContinue.value || createBooking.isPending.value) return;
 
   hasAttempted.value = true;
-  try {
-    const response = await createBooking.mutateAsync({
-      session_id: session.id,
-      customer_name: customerName.value.trim(),
-      customer_phone: customerPhone.value.trim(),
-      quantity: quantity.value,
-      payment_method: paymentMethod.value,
-      idempotency_key: idempotencyKey.value,
-      return_url: midtransCallbackUrl("success"),
-      cancel_url: midtransCallbackUrl("cancel"),
-    });
-    createdBooking.value = response.data;
-    step.value = 3;
-    emit("created", response.data);
-    toast.success(response.message);
-  } catch (error) {
-    const apiError = ApiError.from(error);
-    if (apiError.status === 502) {
-      idempotencyKey.value = newIdempotencyKey();
-      hasAttempted.value = false;
-    }
-    toast.error(apiError.message);
-  }
+  await withToastPromise(
+    async () => {
+      try {
+        const response = await createBooking.mutateAsync({
+          session_id: session.id,
+          customer_name: customerName.value.trim(),
+          customer_phone: customerPhone.value.trim(),
+          quantity: quantity.value,
+          payment_method: paymentMethod.value,
+          idempotency_key: idempotencyKey.value,
+          return_url: midtransCallbackUrl("success"),
+          cancel_url: midtransCallbackUrl("cancel"),
+        });
+        createdBooking.value = response.data;
+        step.value = 3;
+        emit("created", response.data);
+        return {
+          title: "Booking berhasil dibuat",
+          description: `${response.data.booking_code} · ${
+            selectedEvent.value?.name ?? "Event"
+          } · ${formatDateTime(session.starts_at)}`,
+        };
+      } catch (error) {
+        if (ApiError.from(error).status === 502) {
+          idempotencyKey.value = newIdempotencyKey();
+          hasAttempted.value = false;
+        }
+        throw error;
+      }
+    },
+    {
+      loading: "Membuat booking...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Booking gagal dibuat",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
 };
 </script>
 

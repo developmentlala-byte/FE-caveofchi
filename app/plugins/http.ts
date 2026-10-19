@@ -16,7 +16,7 @@ export default defineNuxtPlugin(() => {
 
   return {
     provide: {
-      http: createHttpClient(baseURL),
+      http: createHttpClient(import.meta.client ? "/backend/api" : baseURL),
     },
   };
 });

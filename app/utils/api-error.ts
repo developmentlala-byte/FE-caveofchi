@@ -80,6 +80,16 @@ export class ApiError extends Error {
     return this.status === null;
   }
 
+  get userMessage(): string {
+    const validationMessages = [
+      ...new Set(Object.values(this.errors ?? {}).flat()),
+    ];
+
+    return validationMessages.length
+      ? `${this.message} ${validationMessages.join(" ")}`
+      : this.message;
+  }
+
   /** Pesan error pertama untuk satu field (berguna untuk form). */
   firstError(field: string): string | undefined {
     return this.errors?.[field]?.[0];

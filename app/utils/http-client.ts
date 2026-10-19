@@ -17,6 +17,7 @@ export function createHttpClient(baseURL: string): AxiosInstance {
       Accept: "application/json",
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
+      "ngrok-skip-browser-warning": "false",
     },
   });
 
