@@ -16,7 +16,7 @@ export function createHttpClient(baseURL: string): AxiosInstance {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "false", // untuk bypass warning di ngrok
+      "X-Requested-With": "XMLHttpRequest",
     },
   });
 
@@ -26,21 +26,6 @@ export function createHttpClient(baseURL: string): AxiosInstance {
   //   if (token) config.headers.Authorization = `Bearer ${token}`
   //   return config
   // })
-
-  client.interceptors.request.use((config) => {
-    if (typeof document !== "undefined") {
-      const xsrfCookie = document.cookie
-        .split("; ")
-        .find((cookie) => cookie.startsWith("XSRF-TOKEN="))
-        ?.slice("XSRF-TOKEN=".length);
-
-      if (xsrfCookie) {
-        config.headers.set("X-XSRF-TOKEN", decodeURIComponent(xsrfCookie));
-      }
-    }
-
-    return config;
-  });
 
   client.interceptors.response.use(
     (response) => response,

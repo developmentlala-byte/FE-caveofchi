@@ -6,13 +6,17 @@ import { createHttpClient } from "~/utils/http-client";
  */
 export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig();
-  const apiOrigin = config.public.apiBase
+  const apiBase = config.public.apiBase
     .replace(/\/+$/, "")
     .replace(/\/api$/, "");
+  const apiUrl = `${apiBase}/api`;
+  const baseURL = apiUrl.startsWith("/")
+    ? new URL(apiUrl, useRequestURL().origin).toString()
+    : apiUrl;
 
   return {
     provide: {
-      http: createHttpClient(`${apiOrigin}/api`),
+      http: createHttpClient(baseURL),
     },
   };
 });

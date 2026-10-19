@@ -58,7 +58,12 @@ export function useAuth() {
   }
 
   async function bootstrapCsrf(): Promise<void> {
-    await http.get(`${apiOrigin(config.public.apiBase)}/sanctum/csrf-cookie`);
+    const csrfUrl = new URL(
+      `${apiOrigin(config.public.apiBase)}/sanctum/csrf-cookie`,
+      useRequestURL().origin,
+    ).toString();
+
+    await http.get(csrfUrl);
   }
 
   async function login(
