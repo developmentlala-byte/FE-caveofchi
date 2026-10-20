@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onScopeDispose, ref, watch } from "vue";
 import {
   PhArrowSquareOut,
   PhCalendarBlank,
@@ -52,7 +52,11 @@ const emit = defineEmits<{ created: [booking: EventBooking] }>();
 
 const step = ref<1 | 2 | 3>(1);
 const eventSearch = ref("");
+const debouncedEventSearch = ref("");
+const eventPage = ref(1);
+const eventPageSize = 6;
 const selectedEventId = ref<number | null>(null);
+const selectedEventSnapshot = ref<EventModel | null>(null);
 const selectedSessionId = ref<number | null>(null);
 const customerName = ref("");
 const customerPhone = ref("");
@@ -62,23 +66,36 @@ const hasAttempted = ref(false);
 const createdBooking = ref<EventBooking | null>(null);
 const phoneTouched = ref(false);
 
+let eventSearchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(eventSearch, (value) => {
+  clearTimeout(eventSearchTimer);
+  eventSearchTimer = setTimeout(() => {
+    debouncedEventSearch.value = value.trim();
+    eventPage.value = 1;
+  }, 300);
+});
+onScopeDispose(() => clearTimeout(eventSearchTimer));
+
+const eventQueryParams = computed(() => ({
+  // status: "published",
+  page: eventPage.value,
+  per_page: eventPageSize,
+  ...(debouncedEventSearch.value ? { search: debouncedEventSearch.value } : {}),
+}));
 const eventsQuery = useApiQuery<ApiEnvelope<EventModel[]>>({
-  queryKey: ["booking-event-options"],
+  queryKey: computed(() => ["booking-event-options", eventQueryParams.value]),
   url: "/master/event",
-  params: { status: "published", per_page: 100 },
+  params: eventQueryParams,
   options: { enabled: computed(() => import.meta.client && open.value) },
 });
 const events = computed(() => eventsQuery.data.value?.data ?? []);
-const filteredEvents = computed(() => {
-  const needle = eventSearch.value.trim().toLocaleLowerCase("id-ID");
-  if (!needle) return events.value;
-  return events.value.filter((event) =>
-    `${event.name} ${event.code}`.toLocaleLowerCase("id-ID").includes(needle),
-  );
-});
+const eventMeta = computed(() => eventsQuery.data.value?.meta);
 const selectedEvent = computed(
   () =>
-    events.value.find((event) => event.id === selectedEventId.value) ?? null,
+    events.value.find((event) => event.id === selectedEventId.value) ??
+    (selectedEventSnapshot.value?.id === selectedEventId.value
+      ? selectedEventSnapshot.value
+      : null),
 );
 
 const sessionsQuery = useApiQuery<ApiEnvelope<BookingSession[]>>({
@@ -185,7 +202,10 @@ watch(open, (isOpen) => {
   if (isOpen) {
     step.value = 1;
     eventSearch.value = "";
+    debouncedEventSearch.value = "";
+    eventPage.value = 1;
     selectedEventId.value = events.value[0]?.id ?? null;
+    selectedEventSnapshot.value = events.value[0] ?? null;
     selectedSessionId.value = null;
     customerName.value = "";
     customerPhone.value = "";
@@ -198,8 +218,16 @@ watch(open, (isOpen) => {
 });
 watch(events, (items) => {
   const firstEvent = items.at(0);
-  if (open.value && selectedEventId.value === null && firstEvent) {
+  if (!open.value || !firstEvent) return;
+
+  const selectedOnPage = items.find(
+    (event) => event.id === selectedEventId.value,
+  );
+  if (selectedOnPage) {
+    selectedEventSnapshot.value = selectedOnPage;
+  } else if (selectedEventId.value === null) {
     selectedEventId.value = firstEvent.id;
+    selectedEventSnapshot.value = firstEvent;
   }
 });
 watch(selectedEventId, () => {
@@ -214,13 +242,7 @@ watch(selectedSession, (session) => {
   }
 });
 watch(
-  [
-    selectedSessionId,
-    customerName,
-    customerPhone,
-    quantity,
-    paymentMethod,
-  ],
+  [selectedSessionId, customerName, customerPhone, quantity, paymentMethod],
   () => {
     if (!hasAttempted.value) return;
     idempotencyKey.value = newIdempotencyKey();
@@ -436,13 +458,13 @@ const submitBooking = async () => {
               </Button>
             </div>
             <p
-              v-else-if="events.length === 0"
+              v-else-if="events.length === 0 && !debouncedEventSearch"
               class="py-6 text-center text-sm text-muted-foreground"
             >
               Belum ada event terbit.
             </p>
             <p
-              v-else-if="filteredEvents.length === 0"
+              v-else-if="events.length === 0 && debouncedEventSearch"
               class="py-6 text-center text-sm text-muted-foreground"
             >
               Event tidak ditemukan.
@@ -453,7 +475,7 @@ const submitBooking = async () => {
               role="listbox"
               aria-label="Event"
             >
-              <li v-for="event in filteredEvents" :key="event.id">
+              <li v-for="event in events" :key="event.id">
                 <button
                   type="button"
                   role="option"
@@ -464,7 +486,10 @@ const submitBooking = async () => {
                       ? 'border-primary bg-primary/5'
                       : 'border-border'
                   "
-                  @click="selectedEventId = event.id"
+                  @click="
+                    selectedEventId = event.id;
+                    selectedEventSnapshot = event;
+                  "
                 >
                   <img
                     v-if="event.cover_image_url"
@@ -495,6 +520,35 @@ const submitBooking = async () => {
                 </button>
               </li>
             </ul>
+            <div
+              v-if="(eventMeta?.last_page ?? 1) > 1"
+              class="flex items-center justify-between gap-3"
+              aria-label="Navigasi halaman event"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="eventPage <= 1 || eventsQuery.isFetching.value"
+                @click="eventPage--"
+              >
+                Sebelumnya
+              </Button>
+              <span class="text-xs text-muted-foreground" aria-live="polite">
+                Halaman {{ eventMeta?.current_page ?? eventPage }} dari
+                {{ eventMeta?.last_page }}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="
+                  eventPage >= (eventMeta?.last_page ?? 1) ||
+                  eventsQuery.isFetching.value
+                "
+                @click="eventPage++"
+              >
+                Berikutnya
+              </Button>
+            </div>
           </div>
 
           <!-- Sesi -->
@@ -506,8 +560,11 @@ const submitBooking = async () => {
                 class="text-xs text-muted-foreground"
               >
                 {{ bookableSessions.length }} tersedia
-                <template v-if="displayedSessions.length > bookableSessions.length">
-                  · {{ displayedSessions.length - bookableSessions.length }} penuh
+                <template
+                  v-if="displayedSessions.length > bookableSessions.length"
+                >
+                  ·
+                  {{ displayedSessions.length - bookableSessions.length }} penuh
                 </template>
               </span>
             </div>
@@ -545,7 +602,9 @@ const submitBooking = async () => {
                   type="button"
                   role="option"
                   :aria-selected="selectedSessionId === session.id"
-                  :disabled="!session.is_bookable || session.available_slots === 0"
+                  :disabled="
+                    !session.is_bookable || session.available_slots === 0
+                  "
                   class="flex h-full w-full flex-col gap-2.5 rounded-xl border p-3.5 text-left transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
                   :class="
                     selectedSessionId === session.id
@@ -693,6 +752,16 @@ const submitBooking = async () => {
               <dt class="text-muted-foreground">Harga / slot</dt>
               <dd class="tabular-nums">
                 {{ selectedSession ? formatPrice(selectedSession.price) : "–" }}
+              </dd>
+            </div>
+            <div class="flex justify-between gap-4">
+              <dt class="text-muted-foreground">Jumlah slot</dt>
+              <dd class="tabular-nums">{{ quantity }}</dd>
+            </div>
+            <div class="flex justify-between gap-4 border-t pt-2">
+              <dt class="font-medium">Total</dt>
+              <dd class="font-semibold tabular-nums">
+                {{ selectedSession ? formatPrice(subtotal) : "–" }}
               </dd>
             </div>
           </dl>

@@ -39,12 +39,14 @@ useHead({ title: "Event" });
 const STATUS_LABEL: Record<EventStatus, string> = {
   draft: "Draft",
   published: "Terbit",
+  closed: "Ditutup",
   archived: "Diarsipkan",
 };
 
 const STATUS_CLASS: Record<EventStatus, string> = {
   draft: "border-transparent bg-muted text-muted-foreground",
   published: "border-transparent bg-primary/10 text-primary",
+  closed: "border-transparent bg-destructive/10 text-destructive",
   archived: "border-transparent bg-accent text-accent-foreground",
 };
 
@@ -304,6 +306,17 @@ const archiveEvent = useApiPost<ApiEnvelope<EventModel>, number>({
   ],
   options: { meta: { silentError: true } },
 });
+const toggleEventAvailability = useApiPost<ApiEnvelope<EventModel>, number>({
+  url: (id) => `/master/event/${id}/toggle-availability`,
+  invalidateKeys: [
+    ["events"],
+    ["event-sessions"],
+    ["booking-event-options"],
+    ["booking-session-options"],
+    ["booking-edit-sessions"],
+  ],
+  options: { meta: { silentError: true } },
+});
 
 const createSession = useApiPost<
   ApiEnvelope<EventSession>,
@@ -420,7 +433,8 @@ const eventMutationLoading = computed(
     updateEvent.isPending.value ||
     deleteEvent.isPending.value ||
     publishEvent.isPending.value ||
-    archiveEvent.isPending.value,
+    archiveEvent.isPending.value ||
+    toggleEventAvailability.isPending.value,
 );
 const createEventWorkflowLoading = computed(
   () =>
@@ -480,6 +494,34 @@ const formatError = (error: unknown) => {
     )
     .join(" ");
   return `${apiError.message}${validationDetails ? ` ${validationDetails}` : ""}`;
+};
+
+const refreshEventData = async (eventId: number) => {
+  const [eventsResult, allSessionsResult, filteredSessionsResult] = await Promise.all([
+    eventsQuery.refetch(),
+    sessionsQuery.refetch(),
+    filteredSessionsQuery.refetch(),
+  ]);
+
+  const failedResult = [
+    eventsResult,
+    allSessionsResult,
+    filteredSessionsResult,
+  ].find((result) => result.isError);
+  if (failedResult?.isError) {
+    toast.error("Sesi tersimpan, tetapi data belum diperbarui", {
+      description: ApiError.from(failedResult.error).userMessage,
+      duration: 6000,
+    });
+    return;
+  }
+
+  if (selectedEvent.value?.id !== eventId) return;
+
+  const refreshedEvent = eventsQuery.data.value?.data.find(
+    (event) => event.id === eventId,
+  );
+  if (refreshedEvent) selectedEvent.value = refreshedEvent;
 };
 
 const handleCreateEvent = async (values: EventFormValues) => {
@@ -641,6 +683,40 @@ const handleArchive = async (event: EventModel) => {
   );
 };
 
+const handleToggleEventAvailability = async (event: EventModel) => {
+  const closing = event.status === "published";
+  if (
+    closing &&
+    !window.confirm(
+      `Tutup event "${event.name}"? Peserta tidak dapat membuat booking baru sampai event dibuka kembali.`,
+    )
+  ) {
+    return;
+  }
+
+  await withToastPromise(
+    async () => {
+      const response = await toggleEventAvailability.mutateAsync(event.id);
+      selectedEvent.value = response.data;
+      return {
+        title: closing ? "Event berhasil ditutup" : "Event berhasil dibuka",
+        description: closing
+          ? `${event.name} · Peserta tidak dapat membuat booking baru.`
+          : `${event.name} · Event dapat menerima booking sesuai ketersediaan sesi.`,
+      };
+    },
+    {
+      loading: closing ? "Menutup event..." : "Membuka event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: closing ? "Event gagal ditutup" : "Event gagal dibuka",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
+};
+
 const handleSessionSubmit = async (values: EventSessionFormValues) => {
   const event = selectedEvent.value;
   if (!event) return;
@@ -668,6 +744,7 @@ const handleSessionSubmit = async (values: EventSessionFormValues) => {
           values: payload,
         });
       }
+      await refreshEventData(event.id);
       sessionFormOpen.value = false;
       editingSession.value = null;
       return {
@@ -700,6 +777,7 @@ const handleDeleteSession = async (session: EventSession) => {
         eventId: event.id,
         sessionId: session.id,
       });
+      await refreshEventData(event.id);
       return {
         title: "Sesi berhasil dihapus",
         description: `${event.code} · ${session.studio.name} · ${session.starts_at.replace("T", " ")}`,
@@ -733,6 +811,7 @@ const handleSessionTransition = async (
         eventId: event.id,
         sessionId: session.id,
       });
+      await refreshEventData(event.id);
       return {
         close: {
           title: "Penjualan sesi berhasil ditutup",
@@ -1000,6 +1079,7 @@ const startEditSession = (session: EventSession) => {
       @create-session="startCreateSession"
       @edit-session="startEditSession"
       @publish="handlePublish"
+      @toggle-availability="handleToggleEventAvailability"
       @archive="handleArchive"
       @close-session="handleSessionTransition('close', $event)"
       @cancel-session="handleSessionTransition('cancel', $event)"

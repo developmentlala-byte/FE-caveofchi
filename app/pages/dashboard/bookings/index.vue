@@ -29,6 +29,7 @@ import type {
   EventBooking,
 } from "./types/booking.types";
 import BookingFilter from "./components/BookingFilter.vue";
+import CopyableText from "~/components/CopyableText.vue";
 
 definePageMeta({ layout: "dashboard" });
 useHead({ title: "Booking Event" });
@@ -115,11 +116,13 @@ const columns = columnHelper.columns([
     header: "Kode booking",
     size: 170,
     minSize: 150,
+    cell: (info) => h(CopyableText, { text: info.getValue() }),
   }),
   columnHelper.accessor("customer_name", {
     header: "Customer",
     size: 200,
     minSize: 160,
+    cell: (info) => h(CopyableText, { text: info.getValue() }),
   }),
   columnHelper.accessor("event_name_snapshot", {
     header: "Event dan sesi",
@@ -179,7 +182,10 @@ const updateBooking = useApiPut<
   ],
   options: { meta: { silentError: true } },
 });
-const deleteBooking = useApiDelete<ApiEnvelope<null>, number>({
+const deleteBooking = useApiDelete<
+  ApiEnvelope<{ midtrans_cancelled: boolean | null }>,
+  number
+>({
   url: (id) => `/master/event-booking/${id}`,
   invalidateKeys: [
     ["event-bookings"],
@@ -265,7 +271,7 @@ const handleDelete = async (booking: EventBooking) => {
   if (!canDeleteBooking(booking)) return;
   if (
     !window.confirm(
-      `Hapus booking ${booking.booking_code}? Jika pembayaran Midtrans masih menunggu, transaksi akan dibatalkan. Kuota akan dikembalikan dan data payment lokal ikut dihapus. Tindakan ini tidak bisa dibatalkan.`,
+      `Hapus booking ${booking.booking_code}? Kuota akan dikembalikan. Jika transaksi Midtrans gagal dibatalkan, pembayaran yang terlambat tetap perlu diperiksa manual. Tindakan ini tidak bisa dibatalkan.`,
     )
   ) {
     return;
@@ -273,14 +279,17 @@ const handleDelete = async (booking: EventBooking) => {
 
   await withToastPromise(
     async () => {
-      await deleteBooking.mutateAsync(booking.id);
+      const response = await deleteBooking.mutateAsync(booking.id);
       if (selectedBooking.value?.id === booking.id) {
         selectedBooking.value = null;
         detailOpen.value = false;
       }
       return {
         title: "Booking berhasil dihapus",
-        description: `${booking.booking_code} · Kuota sesi telah dikembalikan.`,
+        description:
+          response.data.midtrans_cancelled === false
+            ? `${booking.booking_code} · Kuota dikembalikan. Transaksi Midtrans belum terkonfirmasi dibatalkan; periksa statusnya.`
+            : `${booking.booking_code} · Kuota sesi telah dikembalikan.`,
       };
     },
     {

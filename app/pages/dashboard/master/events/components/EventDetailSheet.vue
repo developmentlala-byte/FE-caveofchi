@@ -32,14 +32,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DateRangePicker from "~/components/DateRangePicker.vue";
+import ImageDropzone from "~/components/ImageDropzone.vue";
 
 const open = defineModel<boolean>("open", { required: true });
 const props = defineProps<{
@@ -61,6 +62,7 @@ const emit = defineEmits<{
   createSession: [];
   editSession: [session: EventSession];
   publish: [event: EventModel];
+  toggleAvailability: [event: EventModel];
   archive: [event: EventModel];
   closeSession: [session: EventSession];
   cancelSession: [session: EventSession];
@@ -81,11 +83,13 @@ const sessionDateRangeModel = computed({
 const EVENT_LABEL: Record<EventStatus, string> = {
   draft: "Draft",
   published: "Terbit",
+  closed: "Ditutup",
   archived: "Diarsipkan",
 };
 const EVENT_DOT: Record<EventStatus, string> = {
   draft: "bg-amber-500",
   published: "bg-emerald-500",
+  closed: "bg-destructive",
   archived: "bg-muted-foreground/50",
 };
 
@@ -135,6 +139,8 @@ const openCount = computed(
 
 const sectionHint = computed(() => {
   if (!props.event || props.sessionsLoading || props.sessionsError) return "";
+  if (props.event.status === "closed")
+    return "Event ditutup secara manual. Peserta tidak dapat melakukan booking sampai event dibuka kembali.";
   if (props.studiosError) return "";
   if (props.studios.length === 0)
     return "Tambahkan studio aktif sebelum menyiapkan sesi.";
@@ -220,26 +226,18 @@ const canCloseSales = (session: EventSession) =>
 const ICON_BTN =
   "flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
-/* ---------- Galeri ---------- */
-const handleUpload = (e: Event) => {
-  const input = e.target as HTMLInputElement;
-  const files = Array.from(input.files ?? []);
-  if (files.length > 0) emit("uploadImages", files);
-  input.value = "";
-};
 </script>
 
 <template>
-  <Sheet v-model:open="open">
-    <SheetContent
-      side="right"
-      class="flex w-full flex-col gap-0 p-0 text-foreground sm:max-w-2xl"
+  <Dialog v-model:open="open">
+    <DialogContent
+      class="flex max-h-[90vh] w-full max-w-4xl flex-col gap-0 overflow-hidden p-0 text-foreground sm:max-w-4xl"
     >
       <template v-if="!event">
-        <SheetHeader class="p-6 text-left">
-          <SheetTitle>Detail event</SheetTitle>
-          <SheetDescription>Tidak ada event yang dipilih.</SheetDescription>
-        </SheetHeader>
+        <DialogHeader class="p-6 text-left">
+          <DialogTitle>Detail event</DialogTitle>
+          <DialogDescription>Tidak ada event yang dipilih.</DialogDescription>
+        </DialogHeader>
       </template>
 
       <template v-else>
@@ -265,11 +263,11 @@ const handleUpload = (e: Event) => {
                 </div>
               </div>
 
-              <SheetHeader class="gap-1.5 p-0 text-left">
+              <DialogHeader class="gap-1.5 p-0 text-left">
                 <div class="flex items-start justify-between gap-3">
-                  <SheetTitle class="text-xl leading-tight font-semibold">
+                  <DialogTitle class="text-xl leading-tight font-semibold">
                     {{ event.name }}
-                  </SheetTitle>
+                  </DialogTitle>
                   <Badge
                     variant="secondary"
                     class="shrink-0 gap-1.5 font-normal"
@@ -282,12 +280,12 @@ const handleUpload = (e: Event) => {
                     {{ EVENT_LABEL[event.status] }}
                   </Badge>
                 </div>
-                <SheetDescription>
+                <DialogDescription>
                   {{
                     event.short_description || "Belum ada deskripsi singkat."
                   }}
-                </SheetDescription>
-              </SheetHeader>
+                </DialogDescription>
+              </DialogHeader>
 
               <dl class="divide-y rounded-xl border text-sm">
                 <div class="flex items-center justify-between gap-4 px-4 py-3">
@@ -401,15 +399,44 @@ const handleUpload = (e: Event) => {
                 </Button>
               </div>
 
+              <div
+                v-else-if="sessions.length === 0 && event.sessions_count === 0"
+                class="grid gap-3 rounded-xl border border-dashed bg-muted/20 p-5 sm:grid-cols-[1fr_auto] sm:items-center"
+              >
+                <div class="grid gap-1">
+                  <p class="text-sm font-medium">
+                    Event ini belum memiliki sesi
+                  </p>
+                  <p class="text-sm text-muted-foreground">
+                    Detail event tetap tersimpan. Agar peserta dapat memilih
+                    jadwal dan mendaftar, tambahkan sesi dengan studio, waktu,
+                    harga, dan kuota.
+                  </p>
+                  <p
+                    v-if="studios.length === 0 && !studiosError"
+                    class="text-xs text-muted-foreground"
+                  >
+                    Tambahkan studio aktif terlebih dahulu untuk menyiapkan
+                    sesi.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  class="gap-1.5 sm:shrink-0"
+                  :disabled="loading || studios.length === 0"
+                  @click="emit('createSession')"
+                >
+                  <PhPlus :size="14" />
+                  Tambah sesi
+                </Button>
+              </div>
+
               <p
                 v-else-if="sessions.length === 0"
                 class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground"
               >
-                {{
-                  sessionDateRange.start && sessionDateRange.end
-                    ? "Tidak ada sesi pada rentang tanggal ini."
-                    : "Belum ada sesi. Tambahkan jadwal, harga, dan kuota."
-                }}
+                Tidak ada sesi pada rentang tanggal ini. Ubah atau hapus filter
+                tanggal untuk melihat sesi lainnya.
               </p>
 
               <TooltipProvider v-else :delay-duration="150">
@@ -636,6 +663,12 @@ const handleUpload = (e: Event) => {
                   {{ imagesError ? "–" : images.length }} foto
                 </span>
               </div>
+              <ImageDropzone
+                :disabled="loading"
+                accept="image/jpeg,image/png,.jpg,.jpeg,.png,.webp"
+                :allowed-extensions="['jpg', 'jpeg', 'png', 'webp']"
+                @files="emit('uploadImages', $event)"
+              />
 
               <div
                 v-if="imagesLoading"
@@ -695,23 +728,6 @@ const handleUpload = (e: Event) => {
                       <PhX :size="12" />
                     </button>
                   </div>
-
-                  <label
-                    class="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-muted-foreground transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted/50 hover:text-foreground"
-                    :class="loading && 'pointer-events-none opacity-50'"
-                    title="Unggah hingga 20 foto sekaligus"
-                  >
-                    <PhPlus :size="20" />
-                    <span class="text-xs">Tambah foto</span>
-                    <input
-                      class="sr-only"
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      multiple
-                      :disabled="loading"
-                      @change="handleUpload"
-                    />
-                  </label>
                 </div>
                 <p
                   v-if="images.length === 0"
@@ -736,6 +752,16 @@ const handleUpload = (e: Event) => {
             Edit event
           </Button>
           <Button
+            v-if="event.status === 'published' || event.status === 'closed'"
+            variant="outline"
+            class="flex-1 gap-2"
+            :disabled="loading"
+            @click="emit('toggleAvailability', event)"
+          >
+            <PhLockSimple :size="16" />
+            {{ event.status === "published" ? "Tutup event" : "Buka event" }}
+          </Button>
+          <Button
             v-if="canPublish"
             class="flex-1"
             :disabled="loading"
@@ -744,7 +770,7 @@ const handleUpload = (e: Event) => {
             Terbitkan event
           </Button>
           <Button
-            v-if="event.status === 'published'"
+            v-if="event.status === 'published' || event.status === 'closed'"
             variant="outline"
             class="flex-1"
             :disabled="loading"
@@ -754,6 +780,6 @@ const handleUpload = (e: Event) => {
           </Button>
         </div>
       </template>
-    </SheetContent>
-  </Sheet>
+    </DialogContent>
+  </Dialog>
 </template>

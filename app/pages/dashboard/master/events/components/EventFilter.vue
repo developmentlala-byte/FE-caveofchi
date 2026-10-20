@@ -19,6 +19,7 @@ const statusOptions: { value: "all" | EventStatus; label: string }[] = [
   { value: "all", label: "Semua status" },
   { value: "draft", label: "Draft" },
   { value: "published", label: "Terbit" },
+  { value: "closed", label: "Ditutup" },
   { value: "archived", label: "Diarsipkan" },
 ];
 </script>
@@ -48,6 +49,7 @@ const statusOptions: { value: "all" | EventStatus; label: string }[] = [
             value === 'all' ||
             value === 'draft' ||
             value === 'published' ||
+            value === 'closed' ||
             value === 'archived'
           )
             status = value;

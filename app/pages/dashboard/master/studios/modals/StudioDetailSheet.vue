@@ -9,6 +9,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import ImageDropzone from "~/components/ImageDropzone.vue";
 import type { Studio, StudioImage, StudioStatus } from "../type/studio.types";
 
 defineProps<{
@@ -16,11 +17,13 @@ defineProps<{
   galleryImages: StudioImage[];
   galleryLoading: boolean;
   galleryError: boolean;
+  uploadingImages: boolean;
 }>();
 const open = defineModel<boolean>("open", { required: true });
 const emit = defineEmits<{
   edit: [studio: Studio];
   refreshGallery: [];
+  uploadImages: [images: File[]];
 }>();
 
 const statusLabel: Record<StudioStatus, string> = {
@@ -141,6 +144,12 @@ const handleEdit = (value: Studio) => {
                   foto
                 </span>
               </div>
+              <ImageDropzone
+                :disabled="uploadingImages"
+                accept="image/jpeg,image/webp,.jpg,.webp"
+                :allowed-extensions="['jpg', 'webp']"
+                @files="emit('uploadImages', $event)"
+              />
 
               <div
                 v-if="galleryLoading"

@@ -321,6 +321,32 @@ const handleDeleteGalleryImage = async (image: StudioImage) => {
   deletingGalleryImageId.value = null;
 };
 
+const handleUploadStudioImages = async (images: File[]) => {
+  const studio = selectedStudio.value;
+  if (!studio) return;
+
+  await withToastPromise(
+    async () => {
+      await uploadStudioGallery.mutateAsync(
+        toGalleryFormData(studio.id, images),
+      );
+      return {
+        title: "Foto studio berhasil diunggah",
+        description: `${studio.name} · ${images.length} foto ditambahkan ke galeri.`,
+      };
+    },
+    {
+      loading: "Mengunggah foto studio...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Foto studio gagal diunggah",
+        description: ApiError.from(error).userMessage,
+        duration: 6000,
+      }),
+    },
+  );
+};
+
 const handleDelete = async (studio: Studio) => {
   if (
     !window.confirm(
@@ -524,7 +550,9 @@ const formatCapacity = (capacity: number) => `${capacity} orang`;
       :gallery-images="galleryImages"
       :gallery-loading="galleryQuery.isPending.value"
       :gallery-error="galleryQuery.isError.value"
+      :uploading-images="uploadStudioGallery.isPending.value"
       @refresh-gallery="galleryQuery.refetch()"
+      @upload-images="handleUploadStudioImages"
       @edit="(studio) => (editingStudio = studio)"
     />
   </section>

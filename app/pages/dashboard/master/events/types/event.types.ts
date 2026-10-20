@@ -1,4 +1,4 @@
-export type EventStatus = "draft" | "published" | "archived";
+export type EventStatus = "draft" | "published" | "closed" | "archived";
 export type EventCategory = "creative" | "wellness" | "social";
 export type EventSessionStatus =
   | "draft"

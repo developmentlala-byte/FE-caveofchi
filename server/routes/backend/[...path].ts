@@ -13,7 +13,15 @@ export default defineEventHandler((event) => {
   }
 
   const config = useRuntimeConfig(event);
-  const apiOrigin = config.public.apiBase
+  const configuredApiBase = config.public.apiBase.trim();
+  if (!configuredApiBase) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "NUXT_PUBLIC_API_BASE must be configured",
+    });
+  }
+
+  const apiOrigin = configuredApiBase
     .replace(/\/+$/, "")
     .replace(/\/api$/, "");
   let target: URL;
