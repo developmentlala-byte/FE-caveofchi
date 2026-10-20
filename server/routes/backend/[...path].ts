@@ -42,10 +42,14 @@ export default defineEventHandler((event) => {
     });
   }
 
-  target.pathname = `/${path
+  const basePath = target.pathname
+    .replace(/\/+$/, "")
+    .replace(/\/api$/, "");
+  const requestPath = path
     .split("/")
     .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
+    .join("/");
+  target.pathname = `${basePath}/${requestPath}`.replace(/\/+/g, "/");
   target.search = getRequestURL(event).search;
 
   return proxyRequest(event, target.toString());
