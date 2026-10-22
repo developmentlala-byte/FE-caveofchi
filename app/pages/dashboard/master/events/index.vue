@@ -3,7 +3,15 @@ import { computed, onScopeDispose, ref, watch } from "vue";
 import type { DateRange } from "reka-ui";
 import { today } from "@internationalized/date";
 import { createColumnHelper } from "@tanstack/vue-table";
-import { PhEye, PhPencilSimple, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import {
+  PhArrowDown,
+  PhArrowUp,
+  PhDotsSixVertical,
+  PhEye,
+  PhPencilSimple,
+  PhPlus,
+  PhTrash,
+} from "@phosphor-icons/vue";
 import { toast } from "vue-sonner";
 import DataTable from "~/components/DataTable.vue";
 import type { DataTableFeatures } from "~/components/dataTableFeatures";
@@ -14,7 +22,7 @@ import {
 } from "~/composables/useApiMutation";
 import { useApiQuery } from "~/composables/useApiQuery";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import EventDetailSheet from "./components/EventDetailSheet.vue";
 import EventFormDialog from "./components/EventFormDialog.vue";
 import EventSessionFormDialog from "./components/EventSessionFormDialog.vue";
@@ -95,37 +103,50 @@ const activeStudios = computed(() => activeStudiosQuery.data.value?.data ?? []);
 const columnHelper = createColumnHelper<DataTableFeatures, EventModel>();
 const columns = columnHelper.columns([
   columnHelper.display({
+    id: "reorder",
+    header: "",
+    size: 64,
+    minSize: 64,
+    maxSize: 64,
+    enableSorting: false,
+  }),
+  columnHelper.display({
     id: "no",
     header: "No",
     size: 64,
-    minSize: 48,
-    maxSize: 72,
+    minSize: 64,
+    maxSize: 64,
     enableSorting: false,
   }),
   columnHelper.accessor("name", {
     header: "Event",
     size: 260,
     minSize: 200,
+    enableSorting: false,
   }),
   columnHelper.accessor("short_description", {
     header: "Ringkasan",
     size: 260,
     minSize: 180,
+    enableSorting: false,
   }),
   columnHelper.accessor("sessions_count", {
     header: "Sesi",
     size: 90,
     minSize: 76,
+    enableSorting: false,
   }),
   columnHelper.accessor("open_sessions_count", {
     header: "Dijual",
     size: 90,
     minSize: 76,
+    enableSorting: false,
   }),
   columnHelper.accessor("status", {
     header: "Status",
     size: 130,
     minSize: 110,
+    enableSorting: false,
   }),
   columnHelper.display({
     id: "actions",
@@ -282,6 +303,14 @@ const deleteEvent = useApiDelete<ApiEnvelope<null>, number>({
     ["booking-session-options"],
     ["booking-edit-sessions"],
   ],
+  options: { meta: { silentError: true } },
+});
+const reorderEvent = useApiPost<
+  ApiEnvelope<EventModel>,
+  { id: number; target_id: number; position: "before" | "after" }
+>({
+  url: "/master/event/order",
+  invalidateKeys: [["events"]],
   options: { meta: { silentError: true } },
 });
 const publishEvent = useApiPost<ApiEnvelope<EventModel>, number>({
@@ -497,11 +526,12 @@ const formatError = (error: unknown) => {
 };
 
 const refreshEventData = async (eventId: number) => {
-  const [eventsResult, allSessionsResult, filteredSessionsResult] = await Promise.all([
-    eventsQuery.refetch(),
-    sessionsQuery.refetch(),
-    filteredSessionsQuery.refetch(),
-  ]);
+  const [eventsResult, allSessionsResult, filteredSessionsResult] =
+    await Promise.all([
+      eventsQuery.refetch(),
+      sessionsQuery.refetch(),
+      filteredSessionsQuery.refetch(),
+    ]);
 
   const failedResult = [
     eventsResult,
@@ -548,7 +578,9 @@ const handleCreateEvent = async (values: EventFormValues) => {
       });
 
       stage = "menerbitkan event";
-      const publishedResponse = await publishEvent.mutateAsync(response.data.id);
+      const publishedResponse = await publishEvent.mutateAsync(
+        response.data.id,
+      );
       selectedEvent.value = publishedResponse.data;
       detailOpen.value = true;
       return {
@@ -629,6 +661,48 @@ const handleDeleteEvent = async (event: EventModel) => {
       success: (message) => message,
       error: (error) => ({
         title: "Event gagal dihapus",
+        description: formatError(error),
+        duration: 6000,
+      }),
+    },
+  );
+};
+
+const handleEventReorder = async (payload: {
+  sourceId: string;
+  targetId: string;
+  sourceIndex: number;
+  targetIndex: number;
+}) => {
+  const id = Number(payload.sourceId);
+  const targetId = Number(payload.targetId);
+  if (
+    !Number.isSafeInteger(id) ||
+    !Number.isSafeInteger(targetId) ||
+    id === targetId ||
+    reorderEvent.isPending.value
+  ) {
+    return;
+  }
+
+  await withToastPromise(
+    async () => {
+      const response = await reorderEvent.mutateAsync({
+        id,
+        target_id: targetId,
+        position:
+          payload.sourceIndex < payload.targetIndex ? "after" : "before",
+      });
+      return {
+        title: "Urutan event berhasil diperbarui",
+        description: `${response.data.name} akan tampil sesuai posisi barunya di website.`,
+      };
+    },
+    {
+      loading: "Memperbarui urutan event...",
+      success: (message) => message,
+      error: (error) => ({
+        title: "Urutan event gagal diperbarui",
         description: formatError(error),
         duration: 6000,
       }),
@@ -824,7 +898,10 @@ const handleSessionTransition = async (
       }[action];
     },
     {
-      loading: action === "close" ? "Menutup penjualan sesi..." : "Membatalkan sesi...",
+      loading:
+        action === "close"
+          ? "Menutup penjualan sesi..."
+          : "Membatalkan sesi...",
       success: (message) => message,
       error: (error) => ({
         title: "Status sesi gagal diperbarui",
@@ -913,7 +990,7 @@ const startEditSession = (session: EventSession) => {
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Event</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Siapkan konten event dan sesi, lalu buka slot yang siap dijual.
+          Seret handle pada baris untuk mengatur urutan event di website.
         </p>
       </div>
       <Button class="h-10 gap-2 rounded-xl px-4" @click="createOpen = true">
@@ -935,6 +1012,11 @@ const startEditSession = (session: EventSession) => {
           : 'Event tidak ditemukan.'
       "
       clickable
+      row-reorder
+      :get-row-id="(event) => String(event.id)"
+      :row-reorder-disabled="
+        reorderEvent.isPending.value || eventsQuery.isFetching.value
+      "
       manual-pagination
       :page-count="meta?.last_page ?? 0"
       :page-index="pageIndex"
@@ -942,9 +1024,67 @@ const startEditSession = (session: EventSession) => {
       @row-click="openDetails"
       @page-change="(nextPage) => (pageIndex = nextPage)"
       @page-size-change="(nextPageSize) => (pageSize = nextPageSize)"
+      @row-reorder="handleEventReorder"
     >
+      <template
+        #cell-reorder="{
+          row,
+          rowNumber,
+          rowIndex,
+          handleRef,
+          isMobile,
+          moveRowUp,
+          moveRowDown,
+        }"
+      >
+        <div class="flex items-center justify-center gap-1" @click.stop>
+          <button
+            :ref="handleRef"
+            type="button"
+            :class="[
+              buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+              'shrink-0 cursor-grab touch-none text-muted-foreground active:cursor-grabbing',
+            ]"
+            :disabled="
+              reorderEvent.isPending.value || eventsQuery.isFetching.value
+            "
+            :aria-label="`Ubah posisi ${row.original.name}, saat ini urutan ${rowNumber}`"
+            title="Seret untuk mengubah urutan"
+            @click.stop
+          >
+            <PhDotsSixVertical class="size-4" aria-hidden="true" />
+          </button>
+          <div v-if="isMobile" class="flex items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="size-7"
+              :disabled="rowIndex === 0 || reorderEvent.isPending.value"
+              :aria-label="`Pindahkan ${row.original.name} ke atas`"
+              @click.stop="moveRowUp()"
+            >
+              <PhArrowUp class="size-3.5" aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="size-7"
+              :disabled="
+                rowIndex >= events.length - 1 || reorderEvent.isPending.value
+              "
+              :aria-label="`Pindahkan ${row.original.name} ke bawah`"
+              @click.stop="moveRowDown()"
+            >
+              <PhArrowDown class="size-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+      </template>
+
       <template #cell-no="{ rowNumber }">
-        {{ rowNumber }}
+        <span class="tabular-nums">{{ rowNumber }}</span>
       </template>
 
       <template #cell-name="{ row }">
@@ -1053,7 +1193,6 @@ const startEditSession = (session: EventSession) => {
       @submit="handleUpdateEvent"
       @refresh-studios="activeStudiosQuery.refetch()"
     />
-
     <EventDetailSheet
       v-model:open="detailOpen"
       :event="selectedEvent"

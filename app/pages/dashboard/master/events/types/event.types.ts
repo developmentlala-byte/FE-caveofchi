@@ -12,6 +12,7 @@ export interface Event {
   name: string;
   slug: string;
   code: string;
+  sort_order: number;
   category: EventCategory;
   status: EventStatus;
   short_description: string | null;

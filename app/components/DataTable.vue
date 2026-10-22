@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="TData extends Record<string, any>">
-import { computed, ref, useSlots } from "vue";
+import { computed, ref, useSlots, type ComponentPublicInstance } from "vue";
 import {
   FlexRender,
   useTable,
@@ -12,12 +12,15 @@ import {
   type Updater,
 } from "@tanstack/vue-table";
 import {
+  PhArrowDown,
   PhArrowLeft,
   PhArrowRight,
+  PhArrowUp,
   PhCaretDown,
   PhCaretUp,
   PhCaretUpDown,
 } from "@phosphor-icons/vue";
+import { DragDropProvider } from "dnd-kit-vue";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -36,11 +39,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import SortableDataTableRow from "./SortableDataTableRow.vue";
 import { dataTableFeatures, type DataTableFeatures } from "./dataTableFeatures";
 
 /**
  * Cara render isi sel (opsional, per kolom) lewat slot:
- *   #cell-<columnId>="{ row, cell, value, rowNumber }"
+ *   #cell-<columnId>="{ row, cell, value, rowNumber, handleRef, isMobile }"
  *   #footer-<columnId>="{ header }"
  *   #expanded-row="{ row }"
  * Kalau slot tidak ada, dipakai render bawaan dari column def.
@@ -65,6 +69,12 @@ const props = withDefaults(
     expandable?: boolean;
     /** Beri cursor pointer di baris (set true kalau kamu pakai @row-click). */
     clickable?: boolean;
+    /** Aktifkan drag-and-drop urutan untuk baris yang sedang ditampilkan. */
+    rowReorder?: boolean;
+    /** Gunakan ID data yang stabil sebagai identitas draggable. */
+    getRowId?: (row: TData) => string;
+    /** Kunci drag saat data sedang dimuat atau disimpan. */
+    rowReorderDisabled?: boolean;
 
     /** Server-side pagination support */
     manualPagination?: boolean;
@@ -80,14 +90,41 @@ const props = withDefaults(
     expandOnRowClick: false,
     expandable: false,
     clickable: false,
+    rowReorder: false,
+    rowReorderDisabled: false,
     manualPagination: false,
   },
 );
 
 const emit = defineEmits<{
   (e: "row-click", row: TData): void;
+  (e: "row-reorder", payload: {
+    sourceId: string;
+    targetId: string;
+    sourceIndex: number;
+    targetIndex: number;
+  }): void;
   (e: "page-change", page: number): void;
   (e: "page-size-change", pageSize: number): void;
+}>();
+
+type DataTableRow = Row<DataTableFeatures, TData>;
+type CellSlotProps = {
+  row: DataTableRow;
+  cell: ReturnType<DataTableRow["getAllCells"]>[number];
+  value: unknown;
+  rowNumber: number;
+  rowIndex: number;
+  handleRef?: (element: Element | ComponentPublicInstance | null) => void;
+  isMobile: boolean;
+  moveRowUp: () => void;
+  moveRowDown: () => void;
+};
+
+defineSlots<{
+  [slotName: `cell-${string}`]: (props: CellSlotProps) => unknown;
+  [slotName: `footer-${string}`]: (props: { header: unknown }) => unknown;
+  "expanded-row": (props: { row: DataTableRow }) => unknown;
 }>();
 
 const slots = useSlots();
@@ -103,6 +140,69 @@ const SKELETON_WIDTH_PATTERN = [72, 88, 56, 94, 64, 80, 48, 90] as const;
 function getSkeletonWidth(rowIndex: number, colIndex: number) {
   const idx = (rowIndex * 3 + colIndex) % SKELETON_WIDTH_PATTERN.length;
   return `${SKELETON_WIDTH_PATTERN[idx]}%`;
+}
+
+function handleDragEnd(event: {
+  canceled: boolean;
+  operation: {
+    source: unknown;
+    target: { id: string | number } | null;
+  };
+}) {
+  if (!props.rowReorder || event.canceled) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const source = event.operation.source as any;
+  if (!source) return;
+
+  const sourceId = String(source.id ?? "");
+  if (!sourceId) return;
+
+  const rows = table.getRowModel().rows;
+  const sourceIndex = rows.findIndex((row) => row.id === sourceId);
+  if (sourceIndex < 0) return;
+
+  const sortable = source.sortable ?? source;
+  let targetIndex = -1;
+
+  if (typeof sortable.index === "number" && Number.isInteger(sortable.index)) {
+    targetIndex = sortable.index;
+  } else {
+    const targetId = String(event.operation.target?.id ?? "");
+    if (targetId && targetId !== sourceId) {
+      targetIndex = rows.findIndex((row) => row.id === targetId);
+    }
+  }
+
+  if (targetIndex < 0) return;
+  targetIndex = Math.min(Math.max(targetIndex, 0), rows.length - 1);
+
+  const targetId = rows[targetIndex]?.id;
+  if (!targetId || sourceIndex === targetIndex) return;
+
+  emit("row-reorder", { sourceId, targetId, sourceIndex, targetIndex });
+}
+
+function moveRow(sourceIndex: number, targetIndex: number) {
+  if (
+    !props.rowReorder ||
+    props.rowReorderDisabled ||
+    sourceIndex < 0 ||
+    targetIndex < 0
+  ) {
+    return;
+  }
+
+  const rows = table.getRowModel().rows;
+  const source = rows[sourceIndex];
+  const target = rows[targetIndex];
+  if (!source || !target || source.id === target.id) return;
+  emit("row-reorder", {
+    sourceId: source.id,
+    targetId: target.id,
+    sourceIndex,
+    targetIndex,
+  });
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -159,6 +259,9 @@ const table = useTable({
   },
   get columns() {
     return props.columns;
+  },
+  get getRowId() {
+    return props.getRowId;
   },
   columnResizeMode: "onChange",
   enableColumnResizing: true,
@@ -370,7 +473,8 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
           </TableRow>
         </TableHeader>
 
-        <TableBody>
+        <DragDropProvider @dragEnd="handleDragEnd">
+          <TableBody>
           <!-- Skeleton -->
           <template v-if="isLoading">
             <TableRow
@@ -412,51 +516,61 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
               v-for="(row, rowIdx) in table.getRowModel().rows"
               :key="row.id"
             >
-              <TableRow
-                :class="rowClickable(row) ? 'cursor-pointer' : ''"
+              <SortableDataTableRow
+                :id="row.id"
+                :index="rowIdx"
+                :disabled="!rowReorder || rowReorderDisabled || isLoading"
+                :clickable="rowClickable(row)"
                 @click="handleRowClick(row)"
               >
-                <TableCell
-                  v-for="cell in row.getAllCells()"
-                  :key="cell.id"
-                  class="px-5 py-3.5 align-middle text-sm text-foreground"
-                  :style="{ width: `${cell.column.getSize()}px` }"
-                >
-                  <slot
-                    v-if="$slots[`cell-${cell.column.id}`]"
-                    :name="`cell-${cell.column.id}`"
-                    :row="row"
-                    :cell="cell"
-                    :value="cell.getValue()"
-                    :row-number="rowNumberOf(rowIdx)"
-                  />
-                  <FlexRender v-else :cell="cell" />
-                </TableCell>
-                <TableCell
-                  v-if="expandable"
-                  class="px-3 py-3.5 text-right align-middle"
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-8 text-muted-foreground"
-                    :disabled="!row.getCanExpand()"
-                    :aria-label="
-                      row.getIsExpanded()
-                        ? 'Tutup detail row'
-                        : 'Buka detail row'
-                    "
-                    @click.stop="row.toggleExpanded()"
+                <template #default="{ handleRef }">
+                  <TableCell
+                    v-for="cell in row.getAllCells()"
+                    :key="cell.id"
+                    class="px-5 py-3.5 align-middle text-sm text-foreground"
+                    :style="{ width: `${cell.column.getSize()}px` }"
                   >
-                    <PhCaretUp
-                      v-if="row.getIsExpanded()"
-                      weight="bold"
-                      class="size-4"
+                    <slot
+                      v-if="$slots[`cell-${cell.column.id}`]"
+                      :name="`cell-${cell.column.id}`"
+                      :row="row"
+                      :cell="cell"
+                      :value="cell.getValue()"
+                      :row-number="rowNumberOf(rowIdx)"
+                      :row-index="rowIdx"
+                      :is-mobile="false"
+                      :handle-ref="handleRef"
+                      :move-row-up="() => moveRow(rowIdx, rowIdx - 1)"
+                      :move-row-down="() => moveRow(rowIdx, rowIdx + 1)"
                     />
-                    <PhCaretDown v-else weight="bold" class="size-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
+                    <FlexRender v-else :cell="cell" />
+                  </TableCell>
+                  <TableCell
+                    v-if="expandable"
+                    class="px-3 py-3.5 text-right align-middle"
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-8 text-muted-foreground"
+                      :disabled="!row.getCanExpand()"
+                      :aria-label="
+                        row.getIsExpanded()
+                          ? 'Tutup detail row'
+                          : 'Buka detail row'
+                      "
+                      @click.stop="row.toggleExpanded()"
+                    >
+                      <PhCaretUp
+                        v-if="row.getIsExpanded()"
+                        weight="bold"
+                        class="size-4"
+                      />
+                      <PhCaretDown v-else weight="bold" class="size-4" />
+                    </Button>
+                  </TableCell>
+                </template>
+              </SortableDataTableRow>
               <TableRow
                 v-if="row.getIsExpanded() && $slots['expanded-row']"
                 class="bg-muted/15 hover:bg-muted/15"
@@ -467,7 +581,8 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
               </TableRow>
             </template>
           </template>
-        </TableBody>
+          </TableBody>
+        </DragDropProvider>
 
         <TableFooter v-if="!isLoading && hasFooter">
           <TableRow
@@ -563,6 +678,10 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
                 :cell="cell"
                 :value="cell.getValue()"
                 :row-number="rowNumberOf(rowIdx)"
+                :row-index="rowIdx"
+                :is-mobile="true"
+                :move-row-up="() => moveRow(rowIdx, rowIdx - 1)"
+                :move-row-down="() => moveRow(rowIdx, rowIdx + 1)"
               />
               <FlexRender v-else :cell="cell" />
             </div>
