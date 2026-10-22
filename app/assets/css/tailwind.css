@@ -210,3 +210,10 @@
   background: color-mix(in oklch, var(--scrollbar) 75%, var(--foreground));
   background-clip: content-box;
 }
+
+/* Hormati pengguna yang menonaktifkan animasi */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+}

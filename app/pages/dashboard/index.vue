@@ -1,320 +1,286 @@
-<script lang="ts">
-export const iframeHeight = "800px";
-export const description =
-  "A dashboard with sidebar, data table, and analytics cards.";
-</script>
+<!--
+  Halaman Dashboard: hanya menyusun komponen dan mengatur layout.
+  Komponen dashboard diimpor eksplisit dari folder components.
 
+  Layout responsif:
+    HP (<640px)    1 kolom, semua card bertumpuk
+    Tablet (sm/md) KPI 2 kolom, tabel event bisa digeser horizontal
+    Laptop (lg)    KPI 5 kolom; tren 2/3 + perhatian 1/3; event 2/3 + sesi 1/3;
+                   heatmap+studio dan peserta+keuangan berdampingan
+
+  Data dan filter diambil dari endpoint dashboard backend.
+-->
 <script setup lang="ts">
-import { createColumnHelper } from "@tanstack/vue-table";
-import ChartAreaInteractive from "@/components/ChartAreaInteractive.vue";
-import DataTable from "@/components/DataTable.vue";
-import SectionCards from "@/components/SectionCards.vue";
-import type { DataTableFeatures } from "~/components/dataTableFeatures";
+import type { DateRange } from "reka-ui";
+import {
+  DateFormatter,
+  endOfMonth,
+  getLocalTimeZone,
+  startOfMonth,
+  today,
+} from "@internationalized/date";
+import {
+  computed,
+  onBeforeUnmount,
+  reactive,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
+import DashboardAttentionList from "./components/AttentionList.vue";
+import DashboardBookingTrend from "./components/BookingTrend.vue";
+import DashboardBusyHeatmap from "./components/BusyHeatmap.vue";
+import DashboardDefinitions from "./components/Definitions.vue";
+import DashboardErrorState from "./components/ErrorState.vue";
+import DashboardEventPerformance from "./components/EventPerformance.vue";
+import DashboardFilterBar from "./components/FilterBar.vue";
+import DashboardFinanceSummary from "./components/FinanceSummary.vue";
+import DashboardKpiCards from "./components/KpiCards.vue";
+import DashboardParticipants from "./components/Participants.vue";
+import DashboardStudioUtilization from "./components/StudioUtilization.vue";
+import DashboardUpcomingSessions from "./components/UpcomingSessions.vue";
+import SkeletonAttention from "./components/skeleton/AttentionListSkeleton.vue";
+import SkeletonTrend from "./components/skeleton/BookingTrendSkeleton.vue";
+import SkeletonHeatmap from "./components/skeleton/BusyHeatmapSkeleton.vue";
+import SkeletonEvents from "./components/skeleton/EventPerformanceSkeleton.vue";
+import SkeletonFinance from "./components/skeleton/FinanceSummarySkeleton.vue";
+import SkeletonKpi from "./components/skeleton/KpiCardsSkeleton.vue";
+import SkeletonParticipants from "./components/skeleton/ParticipantsSkeleton.vue";
+import SkeletonStudios from "./components/skeleton/StudioUtilizationSkeleton.vue";
+import SkeletonUpcoming from "./components/skeleton/UpcomingSessionsSkeleton.vue";
+import type {
+  DashboardApiEnvelope,
+  DashboardData,
+} from "./types/dashboard.types";
+import { useApiQuery } from "~/composables/useApiQuery";
 
 definePageMeta({ layout: "dashboard" });
+useHead({ title: "Dashboard" });
 
-interface DashboardRow {
-  id: number;
-  header: string;
-  type: string;
-  status: string;
-  target: string;
-  limit: string;
-  reviewer: string;
+const tz = getLocalTimeZone();
+
+// Default: 28 hari terakhir, berakhir kemarin.
+// shallowRef: objek tanggal tidak perlu dibungkus proxy reactive yang dalam.
+const now = today(tz);
+const range = shallowRef<DateRange>({
+  start: startOfMonth(now),
+  end: endOfMonth(now),
+});
+
+const filters = reactive({
+  studio: "all",
+  event: "all",
+  status: "paid",
+});
+
+const requestFilters = computed(() => ({
+  start_date: range.value.start?.toString() ?? "",
+  end_date: range.value.end?.toString() ?? "",
+  ...(filters.studio !== "all" ? { studio_id: Number(filters.studio) } : {}),
+  ...(filters.event !== "all" ? { event_id: Number(filters.event) } : {}),
+  status: filters.status,
+}));
+
+const dashboardQuery = useApiQuery<DashboardApiEnvelope<DashboardData>>({
+  queryKey: computed(() => ["dashboard", requestFilters.value]),
+  url: "/master/dashboard",
+  method: "GET",
+  params: requestFilters,
+  abortOnCancel: false,
+  options: {
+    placeholderData: (previousData) => previousData,
+    enabled: computed(
+      () =>
+        import.meta.client &&
+        Boolean(range.value.start && range.value.end),
+    ),
+  },
+});
+
+const dashboard = computed(() => dashboardQuery.data.value?.data);
+const refreshing = computed(
+  () => dashboardQuery.isFetching.value && Boolean(dashboard.value),
+);
+
+const dim = ref(false);
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+watch(refreshing, (isRefreshing) => {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  if (isRefreshing) {
+    refreshTimer = setTimeout(() => {
+      dim.value = true;
+    }, 150);
+  } else {
+    dim.value = false;
+    refreshTimer = undefined;
+  }
+});
+
+onBeforeUnmount(() => {
+  if (refreshTimer) clearTimeout(refreshTimer);
+});
+
+const liveText = computed(() => {
+  if (dashboardQuery.isError.value && !dashboard.value)
+    return "Data dashboard gagal dimuat.";
+  if (dashboardQuery.isPending.value && !dashboard.value)
+    return "Memuat data dashboard…";
+  if (refreshing.value) return "Memperbarui data dashboard…";
+  return "";
+});
+
+// Teks ringkasan di header mengikuti rentang yang dipilih.
+const fmt = new DateFormatter("id-ID", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+const summary = computed(() => {
+  const { start, end } = range.value;
+  if (!start || !end) return "Pilih rentang tanggal.";
+  const days =
+    Math.round(
+      (end.toDate(tz).getTime() - start.toDate(tz).getTime()) /
+        (24 * 60 * 60 * 1000),
+    ) + 1;
+  return `${fmt.format(start.toDate(tz))} – ${fmt.format(end.toDate(tz))} (${days} hari) · dibandingkan ${days} hari sebelumnya`;
+});
+
+function exportReport() {
+  const data = dashboard.value;
+  if (!data) return;
+
+  const rows: unknown[][] = [
+    ["Jenis data", "Nama", "Nilai", "Keterangan"],
+    ...data.kpis.map((item) => [
+      "Ringkasan",
+      item.label,
+      item.value,
+      item.note,
+    ]),
+    ...data.event_performance.map((item) => [
+      "Performa event",
+      item.name,
+      item.revenue,
+      `${item.sessions} sesi, ${item.bookings} peserta dari kapasitas ${item.capacity}`,
+    ]),
+    ...data.upcoming.sessions.map((item) => [
+      "Sesi mendatang",
+      item.event,
+      item.when,
+      `${item.studio}, ${item.filled}/${item.quota} peserta`,
+    ]),
+  ];
+  const csv = rows
+    .map((row) =>
+      row
+        .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+        .join(","),
+    )
+    .join("\r\n");
+  const url = URL.createObjectURL(
+    new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `dashboard-${requestFilters.value.start_date}-${requestFilters.value.end_date}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
-
-const data: DashboardRow[] = [
-  {
-    id: 1,
-    header: "Cover page",
-    type: "Cover page",
-    status: "In Process",
-    target: "18",
-    limit: "5",
-    reviewer: "Eddie Lake",
-  },
-  {
-    id: 2,
-    header: "Table of contents",
-    type: "Table of contents",
-    status: "Done",
-    target: "29",
-    limit: "24",
-    reviewer: "Eddie Lake",
-  },
-  {
-    id: 3,
-    header: "Executive summary",
-    type: "Narrative",
-    status: "Done",
-    target: "10",
-    limit: "13",
-    reviewer: "Eddie Lake",
-  },
-  {
-    id: 4,
-    header: "Technical approach",
-    type: "Narrative",
-    status: "Done",
-    target: "27",
-    limit: "23",
-    reviewer: "Jamik Tashpulatov",
-  },
-  {
-    id: 5,
-    header: "Design",
-    type: "Narrative",
-    status: "In Process",
-    target: "2",
-    limit: "16",
-    reviewer: "Jamik Tashpulatov",
-  },
-  {
-    id: 6,
-    header: "Capabilities",
-    type: "Narrative",
-    status: "In Process",
-    target: "20",
-    limit: "8",
-    reviewer: "Jamik Tashpulatov",
-  },
-  {
-    id: 7,
-    header: "Integration with existing systems",
-    type: "Narrative",
-    status: "In Process",
-    target: "19",
-    limit: "21",
-    reviewer: "Jamik Tashpulatov",
-  },
-  {
-    id: 8,
-    header: "Innovation and Advantages",
-    type: "Narrative",
-    status: "Done",
-    target: "25",
-    limit: "26",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 9,
-    header: "Overview of EMR's Innovative Solutions",
-    type: "Technical content",
-    status: "Done",
-    target: "7",
-    limit: "23",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 10,
-    header: "Advanced Algorithms and Machine Learning",
-    type: "Narrative",
-    status: "Done",
-    target: "30",
-    limit: "28",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 11,
-    header: "Adaptive Communication Protocols",
-    type: "Narrative",
-    status: "Done",
-    target: "9",
-    limit: "31",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 12,
-    header: "Advantages Over Current Technologies",
-    type: "Narrative",
-    status: "Done",
-    target: "12",
-    limit: "0",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 13,
-    header: "Past Performance",
-    type: "Narrative",
-    status: "Done",
-    target: "22",
-    limit: "33",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 14,
-    header: "Customer Feedback and Satisfaction Levels",
-    type: "Narrative",
-    status: "Done",
-    target: "15",
-    limit: "34",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 15,
-    header: "Implementation Challenges and Solutions",
-    type: "Narrative",
-    status: "Done",
-    target: "3",
-    limit: "35",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 16,
-    header: "Security Measures and Data Protection Policies",
-    type: "Narrative",
-    status: "In Process",
-    target: "6",
-    limit: "36",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 17,
-    header: "Scalability and Future Proofing",
-    type: "Narrative",
-    status: "Done",
-    target: "4",
-    limit: "37",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 18,
-    header: "Cost-Benefit Analysis",
-    type: "Plain language",
-    status: "Done",
-    target: "14",
-    limit: "38",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 19,
-    header: "User Training and Onboarding Experience",
-    type: "Narrative",
-    status: "Done",
-    target: "17",
-    limit: "39",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 20,
-    header: "Future Development Roadmap",
-    type: "Narrative",
-    status: "Done",
-    target: "11",
-    limit: "40",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 21,
-    header: "System Architecture Overview",
-    type: "Technical content",
-    status: "In Process",
-    target: "24",
-    limit: "18",
-    reviewer: "Maya Johnson",
-  },
-  {
-    id: 22,
-    header: "Risk Management Plan",
-    type: "Narrative",
-    status: "Done",
-    target: "15",
-    limit: "22",
-    reviewer: "Carlos Rodriguez",
-  },
-  {
-    id: 23,
-    header: "Compliance Documentation",
-    type: "Legal",
-    status: "In Process",
-    target: "31",
-    limit: "27",
-    reviewer: "Sarah Chen",
-  },
-  {
-    id: 24,
-    header: "API Documentation",
-    type: "Technical content",
-    status: "Done",
-    target: "8",
-    limit: "12",
-    reviewer: "Raj Patel",
-  },
-  {
-    id: 25,
-    header: "User Interface Mockups",
-    type: "Visual",
-    status: "In Process",
-    target: "19",
-    limit: "25",
-    reviewer: "Leila Ahmadi",
-  },
-  {
-    id: 26,
-    header: "Database Schema",
-    type: "Technical content",
-    status: "Done",
-    target: "22",
-    limit: "20",
-    reviewer: "Thomas Wilson",
-  },
-  {
-    id: 27,
-    header: "Testing Methodology",
-    type: "Technical content",
-    status: "In Process",
-    target: "17",
-    limit: "14",
-    reviewer: "Assign reviewer",
-  },
-  {
-    id: 28,
-    header: "Deployment Strategy",
-    type: "Narrative",
-    status: "Done",
-    target: "26",
-    limit: "30",
-    reviewer: "Eddie Lake",
-  },
-  {
-    id: 29,
-    header: "Budget Breakdown",
-    type: "Financial",
-    status: "In Process",
-    target: "13",
-    limit: "16",
-    reviewer: "Jamik Tashpulatov",
-  },
-  {
-    id: 30,
-    header: "Market Analysis",
-    type: "Research",
-    status: "Done",
-    target: "29",
-    limit: "32",
-    reviewer: "Sophia Martinez",
-  },
-];
-
-const columnHelper = createColumnHelper<DataTableFeatures, DashboardRow>();
-const columns = columnHelper.columns([
-  columnHelper.accessor("header", { header: "Dokumen", size: 240 }),
-  columnHelper.accessor("type", { header: "Jenis", size: 170 }),
-  columnHelper.accessor("status", { header: "Status", size: 140 }),
-  columnHelper.accessor("target", { header: "Target", size: 100 }),
-  columnHelper.accessor("limit", { header: "Batas", size: 100 }),
-  columnHelper.accessor("reviewer", { header: "Peninjau", size: 200 }),
-]);
 </script>
 
 <template>
-  <div class="@container/main flex flex-1 flex-col gap-2">
-    <div class="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-      <SectionCards />
-      <div class="px-4 lg:px-6">
-        <ChartAreaInteractive />
+  <div class="mx-auto flex w-full flex-col gap-4 p-4 sm:p-6 lg:gap-5 lg:p-8">
+    <header
+      class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"
+    >
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p class="text-sm text-muted-foreground">{{ summary }}</p>
       </div>
-      <DataTable :columns="columns" :data="data" />
+      <DashboardFilterBar
+        v-model:range="range"
+        v-model:studio="filters.studio"
+        v-model:event="filters.event"
+        v-model:status="filters.status"
+        :studios="dashboard?.filters.studios ?? []"
+        :events="dashboard?.filters.events ?? []"
+        @export="exportReport"
+      />
+    </header>
+
+    <p class="sr-only" role="status" aria-live="polite">{{ liveText }}</p>
+
+    <DashboardErrorState
+      v-if="dashboardQuery.isError.value && !dashboard"
+      @retry="dashboardQuery.refetch()"
+    />
+
+    <div
+      v-else
+      class="flex flex-col gap-4 transition-opacity duration-200 motion-reduce:transition-none lg:gap-5"
+      :class="dim && 'pointer-events-none opacity-60'"
+      :aria-busy="dashboardQuery.isFetching.value"
+    >
+      <DashboardErrorState
+        v-if="dashboardQuery.isError.value && dashboard"
+        compact
+        @retry="dashboardQuery.refetch()"
+      />
+
+      <template v-if="dashboard">
+        <DashboardKpiCards :data="dashboard.kpis" />
+      </template>
+      <SkeletonKpi v-else />
+
+      <section class="grid gap-4 lg:grid-cols-3 lg:gap-5">
+        <DashboardBookingTrend
+          v-if="dashboard"
+          class="lg:col-span-2"
+          :data="dashboard.trend"
+        />
+        <SkeletonTrend v-else class="lg:col-span-2" />
+        <DashboardAttentionList
+          v-if="dashboard"
+          :data="dashboard.attention"
+        />
+        <SkeletonAttention v-else />
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-3 lg:gap-5">
+        <DashboardEventPerformance
+          v-if="dashboard"
+          class="lg:col-span-2"
+          :data="dashboard.event_performance"
+        />
+        <SkeletonEvents v-else class="lg:col-span-2" />
+        <DashboardUpcomingSessions v-if="dashboard" :data="dashboard.upcoming" />
+        <SkeletonUpcoming v-else />
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+        <DashboardBusyHeatmap v-if="dashboard" :data="dashboard.heatmap" />
+        <SkeletonHeatmap v-else />
+        <DashboardStudioUtilization
+          v-if="dashboard"
+          :data="dashboard.studio_utilization"
+        />
+        <SkeletonStudios v-else />
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+        <DashboardParticipants
+          v-if="dashboard"
+          :data="dashboard.participants"
+        />
+        <SkeletonParticipants v-else />
+        <DashboardFinanceSummary v-if="dashboard" :data="dashboard.finance" />
+        <SkeletonFinance v-else />
+      </section>
+
+      <DashboardDefinitions />
     </div>
   </div>
 </template>

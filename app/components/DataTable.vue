@@ -20,7 +20,6 @@ import {
   PhCaretUp,
   PhCaretUpDown,
 } from "@phosphor-icons/vue";
-import { DragDropProvider } from "dnd-kit-vue";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -140,47 +139,6 @@ const SKELETON_WIDTH_PATTERN = [72, 88, 56, 94, 64, 80, 48, 90] as const;
 function getSkeletonWidth(rowIndex: number, colIndex: number) {
   const idx = (rowIndex * 3 + colIndex) % SKELETON_WIDTH_PATTERN.length;
   return `${SKELETON_WIDTH_PATTERN[idx]}%`;
-}
-
-function handleDragEnd(event: {
-  canceled: boolean;
-  operation: {
-    source: unknown;
-    target: { id: string | number } | null;
-  };
-}) {
-  if (!props.rowReorder || event.canceled) return;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const source = event.operation.source as any;
-  if (!source) return;
-
-  const sourceId = String(source.id ?? "");
-  if (!sourceId) return;
-
-  const rows = table.getRowModel().rows;
-  const sourceIndex = rows.findIndex((row) => row.id === sourceId);
-  if (sourceIndex < 0) return;
-
-  const sortable = source.sortable ?? source;
-  let targetIndex = -1;
-
-  if (typeof sortable.index === "number" && Number.isInteger(sortable.index)) {
-    targetIndex = sortable.index;
-  } else {
-    const targetId = String(event.operation.target?.id ?? "");
-    if (targetId && targetId !== sourceId) {
-      targetIndex = rows.findIndex((row) => row.id === targetId);
-    }
-  }
-
-  if (targetIndex < 0) return;
-  targetIndex = Math.min(Math.max(targetIndex, 0), rows.length - 1);
-
-  const targetId = rows[targetIndex]?.id;
-  if (!targetId || sourceIndex === targetIndex) return;
-
-  emit("row-reorder", { sourceId, targetId, sourceIndex, targetIndex });
 }
 
 function moveRow(sourceIndex: number, targetIndex: number) {
@@ -473,8 +431,7 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
           </TableRow>
         </TableHeader>
 
-        <DragDropProvider @dragEnd="handleDragEnd">
-          <TableBody>
+        <TableBody>
           <!-- Skeleton -->
           <template v-if="isLoading">
             <TableRow
@@ -521,7 +478,11 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
                 :index="rowIdx"
                 :disabled="!rowReorder || rowReorderDisabled || isLoading"
                 :clickable="rowClickable(row)"
+                :get-target-id="
+                  (targetIndex) => table.getRowModel().rows[targetIndex]?.id
+                "
                 @click="handleRowClick(row)"
+                @row-reorder="emit('row-reorder', $event)"
               >
                 <template #default="{ handleRef }">
                   <TableCell
@@ -581,8 +542,7 @@ const rowClickable = (row: Row<DataTableFeatures, TData>) =>
               </TableRow>
             </template>
           </template>
-          </TableBody>
-        </DragDropProvider>
+        </TableBody>
 
         <TableFooter v-if="!isLoading && hasFooter">
           <TableRow

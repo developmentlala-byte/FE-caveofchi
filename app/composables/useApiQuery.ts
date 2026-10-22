@@ -30,6 +30,8 @@ export interface UseApiQueryArgs<TData, TSelected = TData> {
   method?: ReadMethod;
   /** Body request, hanya dikirim untuk method QUERY. */
   body?: MaybeRefOrGetter<unknown>;
+  /** Batalkan request saat query tidak lagi aktif. Default: true. */
+  abortOnCancel?: boolean;
   /** Config axios tambahan (header, responseType, dll). */
   config?: Omit<
     AxiosRequestConfig,
@@ -55,6 +57,7 @@ export function useApiQuery<TData = unknown, TSelected = TData>({
   params,
   method = DEFAULT_READ_METHOD,
   body,
+  abortOnCancel = true,
   config,
   options,
 }: UseApiQueryArgs<TData, TSelected>) {
@@ -71,7 +74,7 @@ export function useApiQuery<TData = unknown, TSelected = TData>({
           url: toValue(url),
           params: toValue(params),
           data: method === "QUERY" ? toValue(body) : undefined,
-          signal, // request otomatis dibatalkan kalau query tidak dibutuhkan lagi
+          signal: abortOnCancel ? signal : undefined,
         });
         return data;
       },

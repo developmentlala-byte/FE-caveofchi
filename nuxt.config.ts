@@ -26,14 +26,12 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: [
-        "@dnd-kit/abstract/modifiers",
         "@phosphor-icons/vue",
         "@tanstack/vue-table",
         "@unovis/vue",
         "@vueuse/core",
         "class-variance-authority",
         "clsx",
-        "dnd-kit-vue",
         "reka-ui",
         "tailwind-merge",
         "zod",
